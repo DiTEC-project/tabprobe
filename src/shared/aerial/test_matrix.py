@@ -9,7 +9,8 @@ import numpy as np
 from itertools import combinations, product
 
 
-def generate_aerial_test_matrix(n_features, classes_per_feature, max_antecedents=2):
+def generate_aerial_test_matrix(n_features, classes_per_feature, max_antecedents=2,
+                                use_zeros_for_unmarked=False):
     """
     Generate test matrix (query) - creates ALL antecedent combinations at once.
     Unlike PyAerial which generates incrementally, we create all combinations upfront.
@@ -18,6 +19,11 @@ def generate_aerial_test_matrix(n_features, classes_per_feature, max_antecedents
         n_features: Number of features (columns) in the data
         classes_per_feature: List of number of classes for each feature
         max_antecedents: Maximum number of antecedents to combine
+        use_zeros_for_unmarked: If True, use zeros [0, 0, ...] for unmarked features.
+                               If False, use equal probabilities [0.33, 0.33, 0.33] (default).
+                               Using zeros is better for TabICL since it matches the "missing"
+                               semantic and doesn't confuse similarity-based matching with
+                               non-existent [0.33, 0.33, 0.33] patterns that never appear in real data.
 
     Returns:
         test_matrix: numpy array of shape (n_test_vectors, total_dimensions)
@@ -38,8 +44,9 @@ def generate_aerial_test_matrix(n_features, classes_per_feature, max_antecedents
         })
         start_idx += n_classes
 
-    # Initialize unmarked features with equal probabilities
-    unmarked_features = _initialize_input_vectors(total_dim, feature_value_indices)
+    # Initialize unmarked features with equal probabilities or zeros
+    unmarked_features = _initialize_input_vectors(total_dim, feature_value_indices,
+                                                   use_zeros=use_zeros_for_unmarked)
 
     test_vectors = []
     test_descriptions = []
@@ -73,13 +80,27 @@ def generate_aerial_test_matrix(n_features, classes_per_feature, max_antecedents
     return np.array(test_vectors), test_descriptions, feature_value_indices
 
 
-def _initialize_input_vectors(input_vector_size, categories):
+def _initialize_input_vectors(input_vector_size, categories, use_zeros=False):
     """
-    Initialize the input vectors with equal probabilities for each feature range.
-    This follows PyAerial's initialization logic.
+    Initialize the input vectors for unmarked features.
+
+    Args:
+        input_vector_size: Total dimension of the vector
+        categories: List of feature ranges with 'start' and 'end' indices
+        use_zeros: If True, use zeros for unmarked features (better for TabICL).
+                  If False, use equal probabilities (PyAerial's approach for autoencoders).
+
+    Returns:
+        vector_with_unmarked_features: Initialized vector
     """
     vector_with_unmarked_features = np.zeros(input_vector_size)
-    for category in categories:
-        vector_with_unmarked_features[category['start']:category['end']] = 1 / (
-                category['end'] - category['start'])
+
+    if not use_zeros:
+        # PyAerial approach: equal probabilities for each class within a feature
+        # This is semantically correct for autoencoders: "no preference"
+        for category in categories:
+            vector_with_unmarked_features[category['start']:category['end']] = 1 / (
+                    category['end'] - category['start'])
+    # else: keep zeros (better for TabICL's similarity-based matching)
+
     return vector_with_unmarked_features
