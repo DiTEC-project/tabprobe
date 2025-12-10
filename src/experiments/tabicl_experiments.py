@@ -33,17 +33,25 @@ This baseline serves to justify the need for custom tabular foundation models
 specifically designed for unsupervised rule discovery.
 """
 import time
+import os
 import numpy as np
 import pandas as pd
+from datetime import datetime
+import torch
 
-from ucimlrepo import fetch_ucirepo
 from tabicl import TabICLClassifier
 
-from src.shared.aerial import prepare_categorical_data
-from src.shared.aerial.data_prep import add_gaussian_noise
-from src.shared.aerial.test_matrix import generate_aerial_test_matrix
-from src.shared.aerial.rule_extraction import extract_rules_from_reconstruction
-from src.shared.rule_quality import calculate_rule_metrics
+from src.utils.aerial import prepare_categorical_data
+from src.utils.aerial.data_prep import add_gaussian_noise
+from src.utils.aerial.test_matrix import generate_aerial_test_matrix
+from src.utils.aerial.rule_extraction import extract_rules_from_reconstruction
+from src.utils import (
+    get_ucimlrepo_datasets,
+    get_gene_expression_datasets,
+    calculate_rule_metrics,
+    set_seed,
+    generate_seed_sequence,
+)
 
 
 def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
@@ -154,7 +162,7 @@ def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
 
 
 def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
-                         ant_similarity=0.5, cons_similarity=0.8):
+                         ant_similarity=0.5, cons_similarity=0.8, batch_size=64, random_state=42):
     """
     End-to-end unsupervised rule learning using TabICL.
 
@@ -164,6 +172,8 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
         context_samples: Number of samples to use as context
         ant_similarity: Antecedent threshold
         cons_similarity: Consequent threshold
+        batch_size: Batch size for TabICL model
+        random_state: Random seed for TabICL model (for reproducibility)
 
     Returns:
         rules: List of extracted association rules
@@ -190,8 +200,8 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
     print(f"\nTest matrix shape: {test_matrix.shape}")
     print(f"Number of test vectors: {len(test_descriptions)}")
 
-    # Initialize TabICL
-    tabicl_model = TabICLClassifier()
+    # Initialize TabICL with random_state for reproducibility
+    tabicl_model = TabICLClassifier(batch_size=batch_size, random_state=random_state, n_estimators=8)
 
     # Adapt TabICL for reconstruction
     print(f"\nUsing TabICL for pattern reconstruction...")
@@ -219,7 +229,7 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
 
     print(f"{len(rules)} rules found!")
 
-    return rules, feature_names
+    return rules, feature_names, dataset.values
 
 
 # Main execution
@@ -228,77 +238,190 @@ if __name__ == "__main__":
     print("TabICL Baseline for Rule Learning")
     print("=" * 80)
 
-    # Load dataset
-    print("\n" + "=" * 80)
-    print("Loading breast cancer dataset...")
-    breast_cancer = fetch_ucirepo(id=14)
-    # congressional_voting_records = fetch_ucirepo(id=105)
-    X_features = breast_cancer.data.features
-    y_target = breast_cancer.data.targets
+    # Parameters
+    n_runs = 10  # Match TabPFN for fair comparison
+    max_antecedents = 2
+    ant_similarity = 0.5
+    cons_similarity = 0.8
+    context_samples = None
+    batch_size = 8
+    base_seed = 42  # Base seed for reproducibility
 
-    # Combine features and target into single table
-    full_data = pd.concat([X_features, y_target], axis=1)
+    # Generate seed sequence for all runs
+    print(f"\nGenerating seed sequence from base_seed={base_seed}...")
+    seed_sequence = generate_seed_sequence(base_seed, n_runs)
+    print(f"Seeds for {n_runs} runs: {seed_sequence}")
 
-    print(f"Features shape: {X_features.shape}")
-    print(f"Target shape: {y_target.shape}")
-    print(f"Combined data shape: {full_data.shape}")
+    # Load datasets
+    print("\nLoading datasets...")
+    datasets = get_gene_expression_datasets(max_columns=50)
 
-    # Extract rules with timing
-    print("\n" + "=" * 80)
-    print("Starting rule extraction...")
-    start_time = time.time()
+    # Create output directory
+    os.makedirs("out", exist_ok=True)
 
-    extracted_rules, feature_names = tabicl_rule_learning(
-        dataset=full_data,
-        max_antecedents=2,
-        context_samples=X_features.shape[0],
-        ant_similarity=0.0,  # Disabled: TabICL cannot validate antecedents
-        cons_similarity=0.8
-    )
+    # Results storage - store all individual runs
+    all_individual_results = []
+    all_average_results = []
 
-    end_time = time.time()
-    elapsed_time = end_time - start_time
+    # Run experiments for each dataset
+    for dataset_info in datasets:
+        dataset_name = dataset_info['name']
+        dataset = dataset_info['data']
 
-    # Display results
-    print(f"\n{'=' * 80}")
-    print(f"RESULTS")
-    print(f"{'=' * 80}")
-    print(f"Total time: {elapsed_time:.2f} seconds")
-    print(f"Extracted {len(extracted_rules)} rules")
-
-    if len(extracted_rules) > 0:
-        # Calculate rule quality metrics
         print("\n" + "=" * 80)
-        print("CALCULATING RULE QUALITY METRICS...")
+        print(f"Dataset: {dataset_name}")
         print("=" * 80)
+        print(f"Shape: {dataset.shape}")
 
-        # Convert original data to proper format for metrics calculation
-        original_data_array = full_data.values
+        # Storage for this dataset's runs
+        dataset_runs = []
 
-        # Calculate metrics for all rules
-        rules_with_metrics, avg_metrics = calculate_rule_metrics(
-            rules=extracted_rules,
-            data=original_data_array,
-            feature_names=feature_names,
-            metric_names=['support', 'confidence', 'rule_coverage', 'zhangs_metric']
-        )
+        # Run N times
+        for run_idx in range(n_runs):
+            run_seed = seed_sequence[run_idx]
+            print(f"\n--- Run {run_idx + 1}/{n_runs} (seed={run_seed}) ---")
 
-        # Display first 10 rules with their metrics
-        print("\nFirst 10 rules with metrics:")
-        for idx, rule in enumerate(rules_with_metrics[:10], 1):
-            antecedents_str = " AND ".join([f"{a['feature']}={a['value']}" for a in rule['antecedents']])
-            consequent_str = f"{rule['consequent']['feature']}={rule['consequent']['value']}"
-            print(f"{idx}. {antecedents_str} => {consequent_str}")
-            print(f"    Support: {rule['support']:.4f}, Confidence: {rule['confidence']:.4f}, "
-                  f"Coverage: {rule['rule_coverage']:.4f}, Zhang: {rule['zhangs_metric']:.4f}")
+            # Set global seed for this run
+            set_seed(run_seed)
 
-        # Display average metrics
-        print("\n" + "=" * 80)
-        print("RULE QUALITY METRICS (Averages)")
-        print("=" * 80)
+            # Track peak GPU memory
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
+                initial_gpu_memory = torch.cuda.memory_allocated() / 1024 ** 2
 
-        for metric_name, value in avg_metrics.items():
-            print(f"{metric_name}: {value:.4f}")
+            start_time = time.time()
 
-    else:
-        print("\nWARNING: No rules extracted! ")
+            extracted_rules, feature_names, original_data = tabicl_rule_learning(
+                dataset=dataset,
+                max_antecedents=max_antecedents,
+                context_samples=context_samples if context_samples else dataset.shape[0],
+                ant_similarity=ant_similarity,
+                cons_similarity=cons_similarity,
+                batch_size=batch_size,
+                random_state=run_seed  # Pass seed to TabICL for reproducibility
+            )
+
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+
+            # Get peak GPU memory usage
+            peak_gpu_memory_mb = 0.0
+            if torch.cuda.is_available():
+                peak_gpu_memory_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
+
+            print(f"\nRun {run_idx + 1} completed in {elapsed_time:.2f} seconds")
+            print(f"Extracted {len(extracted_rules)} rules")
+            if torch.cuda.is_available():
+                print(f"Peak GPU Memory: {peak_gpu_memory_mb:.2f} MB")
+
+            # Calculate metrics
+            if len(extracted_rules) > 0:
+                rules_with_metrics, avg_metrics = calculate_rule_metrics(
+                    rules=extracted_rules,
+                    data=original_data,
+                    feature_names=feature_names
+                )
+
+                print(f"  Support: {avg_metrics['support']:.4f}")
+                print(f"  Confidence: {avg_metrics['confidence']:.4f}")
+                print(f"  Zhang's Metric: {avg_metrics['zhangs_metric']:.4f}")
+
+                # Store results for this run
+                result = {
+                    'dataset': dataset_name,
+                    'run': run_idx + 1,
+                    'seed': run_seed,
+                    'num_rules': avg_metrics['num_rules'],
+                    'avg_support': avg_metrics['support'],
+                    'avg_confidence': avg_metrics['confidence'],
+                    'avg_zhangs_metric': avg_metrics['zhangs_metric'],
+                    'avg_interestingness': avg_metrics['interestingness'],
+                    'avg_rule_coverage': avg_metrics['rule_coverage'],
+                    'data_coverage': avg_metrics['data_coverage'],
+                    'execution_time': elapsed_time,
+                    'peak_gpu_memory_mb': peak_gpu_memory_mb
+                }
+            else:
+                print("  WARNING: No rules extracted!")
+                result = {
+                    'dataset': dataset_name,
+                    'run': run_idx + 1,
+                    'seed': run_seed,
+                    'num_rules': 0,
+                    'avg_support': 0.0,
+                    'avg_confidence': 0.0,
+                    'avg_zhangs_metric': 0.0,
+                    'avg_interestingness': 0.0,
+                    'avg_rule_coverage': 0.0,
+                    'data_coverage': 0.0,
+                    'execution_time': elapsed_time,
+                    'peak_gpu_memory_mb': peak_gpu_memory_mb
+                }
+
+            dataset_runs.append(result)
+            all_individual_results.append(result)
+
+        # Calculate averages across runs for this dataset
+        avg_result = {
+            'dataset': dataset_name,
+            'num_rules': np.mean([r['num_rules'] for r in dataset_runs]),
+            'avg_support': np.mean([r['avg_support'] for r in dataset_runs]),
+            'avg_confidence': np.mean([r['avg_confidence'] for r in dataset_runs]),
+            'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in dataset_runs]),
+            'avg_interestingness': np.mean([r['avg_interestingness'] for r in dataset_runs]),
+            'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in dataset_runs]),
+            'data_coverage': np.mean([r['data_coverage'] for r in dataset_runs]),
+            'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
+            'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
+        }
+        all_average_results.append(avg_result)
+
+        print(f"\n=== Average Results for {dataset_name} (over {n_runs} runs) ===")
+        print(f"  Rules: {avg_result['num_rules']:.1f}")
+        print(f"  Support: {avg_result['avg_support']:.4f}")
+        print(f"  Confidence: {avg_result['avg_confidence']:.4f}")
+        print(f"  Zhang's Metric: {avg_result['avg_zhangs_metric']:.4f}")
+        print(f"  Interestingness: {avg_result['avg_interestingness']:.4f}")
+        print(f"  Rule Coverage: {avg_result['avg_rule_coverage']:.4f}")
+        print(f"  Data Coverage: {avg_result['data_coverage']:.4f}")
+        print(f"  Avg Time: {avg_result['execution_time']:.2f}s")
+        print(f"  Avg Peak GPU Memory: {avg_result['peak_gpu_memory_mb']:.2f} MB")
+
+    # Save results to Excel with multiple sheets
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"out/tabicl_{timestamp}.xlsx"
+
+    with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
+        # Sheet 1: Individual run results
+        individual_df = pd.DataFrame(all_individual_results)
+        individual_df.to_excel(writer, sheet_name='Individual Results', index=False)
+
+        # Sheet 2: Average results per dataset
+        average_df = pd.DataFrame(all_average_results)
+        average_df.to_excel(writer, sheet_name='Average Results', index=False)
+
+        # Sheet 3: Parameters
+        params_df = pd.DataFrame([{
+            'n_runs': n_runs,
+            'base_seed': base_seed,
+            'max_antecedents': max_antecedents,
+            'ant_similarity': ant_similarity,
+            'cons_similarity': cons_similarity,
+            'batch_size': batch_size
+        }])
+        params_df.to_excel(writer, sheet_name='Parameters', index=False)
+
+        # Sheet 4: Seed Sequence (for reproducibility)
+        seeds_df = pd.DataFrame({
+            'run': list(range(1, n_runs + 1)),
+            'seed': seed_sequence
+        })
+        seeds_df.to_excel(writer, sheet_name='Seeds', index=False)
+
+    print("\n" + "=" * 80)
+    print(f"Results saved to {output_filename}")
+    print(f"  - Sheet 1: Individual Results (all {n_runs * len(datasets)} runs)")
+    print(f"  - Sheet 2: Average Results (per dataset)")
+    print(f"  - Sheet 3: Parameters (including base_seed={base_seed})")
+    print(f"  - Sheet 4: Seeds (seed sequence for reproducibility)")
+    print("=" * 80)

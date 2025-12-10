@@ -1,0 +1,22 @@
+einops==0.8.1
+huggingface-hub==0.36.0
+joblib==1.4.2
+networkx==3.5
+numpy==2.0.2
+openpyxl==3.1.5
+packaging==25.0
+pandas==2.2.3
+psutil==7.1.3
+pyaerial==1.0.24
+sap_rpt_oss @ git+https://github.com/SAP-samples/sap-rpt-1-oss@4310453f3bbb9c9c403b029e966565e7fe652d97
+scikit-learn==1.6.1
+scipy==1.16.2
+tabicl==0.1.4
+tabpfn==6.0.6
+tabpfn-extensions==0.2.2
+torch==2.7.1
+tqdm==4.67.1
+transformers==4.57.1
+ucimlrepo==0.0.7
+wandb==0.23.0
+xgboost==3.1.1
