@@ -162,7 +162,7 @@ def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
 
 
 def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
-                         ant_similarity=0.5, cons_similarity=0.8, batch_size=64, random_state=42):
+                         ant_similarity=0.5, cons_similarity=0.8, random_state=42):
     """
     End-to-end unsupervised rule learning using TabICL.
 
@@ -172,7 +172,6 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
         context_samples: Number of samples to use as context
         ant_similarity: Antecedent threshold
         cons_similarity: Consequent threshold
-        batch_size: Batch size for TabICL model
         random_state: Random seed for TabICL model (for reproducibility)
 
     Returns:
@@ -201,7 +200,7 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
     print(f"Number of test vectors: {len(test_descriptions)}")
 
     # Initialize TabICL with random_state for reproducibility
-    tabicl_model = TabICLClassifier(batch_size=batch_size, random_state=random_state, n_estimators=8)
+    tabicl_model = TabICLClassifier(random_state=random_state, n_estimators=8)
 
     # Adapt TabICL for reconstruction
     print(f"\nUsing TabICL for pattern reconstruction...")
@@ -244,7 +243,6 @@ if __name__ == "__main__":
     ant_similarity = 0.5
     cons_similarity = 0.8
     context_samples = None
-    batch_size = 8
     base_seed = 42  # Base seed for reproducibility
 
     # Generate seed sequence for all runs
@@ -254,7 +252,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_gene_expression_datasets(max_columns=50)
+    datasets = get_ucimlrepo_datasets(size="small")
 
     # Create output directory
     os.makedirs("out", exist_ok=True)
@@ -297,7 +295,6 @@ if __name__ == "__main__":
                 context_samples=context_samples if context_samples else dataset.shape[0],
                 ant_similarity=ant_similarity,
                 cons_similarity=cons_similarity,
-                batch_size=batch_size,
                 random_state=run_seed  # Pass seed to TabICL for reproducibility
             )
 
@@ -362,21 +359,39 @@ if __name__ == "__main__":
             all_individual_results.append(result)
 
         # Calculate averages across runs for this dataset
-        avg_result = {
-            'dataset': dataset_name,
-            'num_rules': np.mean([r['num_rules'] for r in dataset_runs]),
-            'avg_support': np.mean([r['avg_support'] for r in dataset_runs]),
-            'avg_confidence': np.mean([r['avg_confidence'] for r in dataset_runs]),
-            'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in dataset_runs]),
-            'avg_interestingness': np.mean([r['avg_interestingness'] for r in dataset_runs]),
-            'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in dataset_runs]),
-            'data_coverage': np.mean([r['data_coverage'] for r in dataset_runs]),
-            'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
-            'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
-        }
+        # Only average rule metrics over runs that produced rules (>0 rules)
+        runs_with_rules = [r for r in dataset_runs if r['num_rules'] > 0]
+        n_runs_with_rules = len(runs_with_rules)
+
+        if n_runs_with_rules > 0:
+            avg_result = {
+                'dataset': dataset_name,
+                'num_rules': np.mean([r['num_rules'] for r in runs_with_rules]),
+                'avg_support': np.mean([r['avg_support'] for r in runs_with_rules]),
+                'avg_confidence': np.mean([r['avg_confidence'] for r in runs_with_rules]),
+                'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in runs_with_rules]),
+                'avg_interestingness': np.mean([r['avg_interestingness'] for r in runs_with_rules]),
+                'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in runs_with_rules]),
+                'data_coverage': np.mean([r['data_coverage'] for r in runs_with_rules]),
+                'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
+                'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
+            }
+        else:
+            avg_result = {
+                'dataset': dataset_name,
+                'num_rules': 0,
+                'avg_support': 0.0,
+                'avg_confidence': 0.0,
+                'avg_zhangs_metric': 0.0,
+                'avg_interestingness': 0.0,
+                'avg_rule_coverage': 0.0,
+                'data_coverage': 0.0,
+                'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
+                'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
+            }
         all_average_results.append(avg_result)
 
-        print(f"\n=== Average Results for {dataset_name} (over {n_runs} runs) ===")
+        print(f"\n=== Average Results for {dataset_name} ({n_runs_with_rules}/{n_runs} runs with rules) ===")
         print(f"  Rules: {avg_result['num_rules']:.1f}")
         print(f"  Support: {avg_result['avg_support']:.4f}")
         print(f"  Confidence: {avg_result['avg_confidence']:.4f}")
@@ -406,8 +421,7 @@ if __name__ == "__main__":
             'base_seed': base_seed,
             'max_antecedents': max_antecedents,
             'ant_similarity': ant_similarity,
-            'cons_similarity': cons_similarity,
-            'batch_size': batch_size
+            'cons_similarity': cons_similarity
         }])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
 

@@ -13,7 +13,6 @@ scikit-learn==1.6.1
 scipy==1.16.2
 tabicl==0.1.4
 tabpfn==6.0.6
-tabpfn-extensions==0.2.2
 torch==2.7.1
 tqdm==4.67.1
 transformers==4.57.1

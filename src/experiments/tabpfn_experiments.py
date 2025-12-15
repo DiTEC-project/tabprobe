@@ -273,7 +273,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_gene_expression_datasets(max_columns=50)
+    datasets = get_ucimlrepo_datasets(size="small")
 
     # Create output directory
     os.makedirs("out", exist_ok=True)
@@ -343,6 +343,9 @@ if __name__ == "__main__":
                 print(f"  Support: {avg_metrics['support']:.4f}")
                 print(f"  Confidence: {avg_metrics['confidence']:.4f}")
                 print(f"  Zhang's Metric: {avg_metrics['zhangs_metric']:.4f}")
+                print(f"  Interestingness: {avg_metrics['interestingness']:.4f}")
+                print(f"  Rule coverage: {avg_metrics['rule_coverage']:.4f}")
+                print(f"  Data coverage: {avg_metrics['data_coverage']:.4f}")
 
                 # Store results for this run
                 result = {
@@ -380,21 +383,39 @@ if __name__ == "__main__":
             all_individual_results.append(result)
 
         # Calculate averages across runs for this dataset
-        avg_result = {
-            'dataset': dataset_name,
-            'num_rules': np.mean([r['num_rules'] for r in dataset_runs]),
-            'avg_support': np.mean([r['avg_support'] for r in dataset_runs]),
-            'avg_confidence': np.mean([r['avg_confidence'] for r in dataset_runs]),
-            'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in dataset_runs]),
-            'avg_interestingness': np.mean([r['avg_interestingness'] for r in dataset_runs]),
-            'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in dataset_runs]),
-            'data_coverage': np.mean([r['data_coverage'] for r in dataset_runs]),
-            'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
-            'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
-        }
+        # Only average rule metrics over runs that produced rules (>0 rules)
+        runs_with_rules = [r for r in dataset_runs if r['num_rules'] > 0]
+        n_runs_with_rules = len(runs_with_rules)
+
+        if n_runs_with_rules > 0:
+            avg_result = {
+                'dataset': dataset_name,
+                'num_rules': np.mean([r['num_rules'] for r in runs_with_rules]),
+                'avg_support': np.mean([r['avg_support'] for r in runs_with_rules]),
+                'avg_confidence': np.mean([r['avg_confidence'] for r in runs_with_rules]),
+                'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in runs_with_rules]),
+                'avg_interestingness': np.mean([r['avg_interestingness'] for r in runs_with_rules]),
+                'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in runs_with_rules]),
+                'data_coverage': np.mean([r['data_coverage'] for r in runs_with_rules]),
+                'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
+                'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
+            }
+        else:
+            avg_result = {
+                'dataset': dataset_name,
+                'num_rules': 0,
+                'avg_support': 0.0,
+                'avg_confidence': 0.0,
+                'avg_zhangs_metric': 0.0,
+                'avg_interestingness': 0.0,
+                'avg_rule_coverage': 0.0,
+                'data_coverage': 0.0,
+                'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
+                'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
+            }
         all_average_results.append(avg_result)
 
-        print(f"\n=== Average Results for {dataset_name} (over {n_runs} runs) ===")
+        print(f"\n=== Average Results for {dataset_name} ({n_runs_with_rules}/{n_runs} runs with rules) ===")
         print(f"  Rules: {avg_result['num_rules']:.1f}")
         print(f"  Support: {avg_result['avg_support']:.4f}")
         print(f"  Confidence: {avg_result['avg_confidence']:.4f}")

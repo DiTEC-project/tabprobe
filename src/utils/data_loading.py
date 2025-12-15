@@ -19,7 +19,7 @@ UCIMLREPO_DIR = DATA_DIR / "ucimlrepo"
 GENE_EXPRESSION_DIR = DATA_DIR / "gene_expression"
 
 # Available UCI datasets
-UCIMLREPO_DATASETS = [
+UCIMLREPO_NORMAL_DATASETS = [
     'congressional_voting',
     'breast_cancer',
     'mushroom',
@@ -27,30 +27,55 @@ UCIMLREPO_DATASETS = [
     'spambase',
 ]
 
+UCIMLREPO_SMALL_DATASETS = [
+    'lung_cancer',
+    'hepatitis',
+    'breast_cancer_coimbra',
+    'cervical_cancer_behavior_risk',
+    'autism_screening_adolescent',
+]
+
 # Datasets that need discretization (have numerical features)
-DATASETS_TO_DISCRETIZE = {'spambase'}
+DATASETS_TO_DISCRETIZE = {
+    'spambase',
+    'hepatitis',
+    'breast_cancer_coimbra',
+    'cervical_cancer_behavior_risk',
+    'autism_screening_adolescent',
+}
 
 
 def get_ucimlrepo_datasets(
-    names: Optional[List[str]] = None,
-    discretize: bool = True
+        names: Optional[List[str]] = None,
+        size: str = 'normal',
+        discretize: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Load UCI ML Repository datasets from local CSV files.
 
     Args:
-        names: List of dataset names to load. If None, loads all available datasets.
+        names: List of dataset names to load. If None, loads all available datasets for the given size.
+        size: 'normal' for normal_size_tables, 'small' for small_size_tables.
         discretize: If True, automatically discretize numerical datasets (default: True).
 
     Returns:
         List of dictionaries with 'name' and 'data' (DataFrame) keys.
     """
+    if size == 'normal':
+        data_dir = UCIMLREPO_DIR / "normal_size_tables"
+        default_datasets = UCIMLREPO_NORMAL_DATASETS
+    elif size == 'small':
+        data_dir = UCIMLREPO_DIR / "small_size_tables"
+        default_datasets = UCIMLREPO_SMALL_DATASETS
+    else:
+        raise ValueError(f"Invalid size '{size}'. Must be 'normal' or 'small'.")
+
     if names is None:
-        names = UCIMLREPO_DATASETS.copy()
+        names = default_datasets.copy()
 
     datasets = []
     for name in names:
-        filepath = UCIMLREPO_DIR / f"{name}.csv"
+        filepath = data_dir / f"{name}.csv"
         if not filepath.exists():
             raise FileNotFoundError(f"Dataset not found: {filepath}")
 
@@ -68,8 +93,7 @@ def get_ucimlrepo_datasets(
 
 
 def get_gene_expression_datasets(
-    names: Optional[List[str]] = None,
-    max_columns: Optional[int] = None
+        names: Optional[List[str]] = None
 ) -> List[Dict[str, Any]]:
     """
     Load gene expression datasets from local CSV files.
@@ -77,7 +101,6 @@ def get_gene_expression_datasets(
     Args:
         names: List of dataset names (without extension) to load.
                If None, loads all available datasets.
-        max_columns: If specified, return only the first D columns of each table.
 
     Returns:
         List of dictionaries with 'name' and 'data' (DataFrame) keys.
@@ -93,10 +116,6 @@ def get_gene_expression_datasets(
             raise FileNotFoundError(f"Dataset not found: {filepath}")
 
         df = pd.read_csv(filepath)
-
-        if max_columns is not None:
-            df = df.iloc[:, :max_columns]
-
         datasets.append({
             'name': name,
             'data': df
@@ -110,18 +129,26 @@ def list_available_datasets(source: str = 'all') -> Dict[str, List[str]]:
     List all available datasets.
 
     Args:
-        source: 'ucimlrepo', 'gene_expression', or 'all'
+        source: 'ucimlrepo', 'ucimlrepo_normal', 'ucimlrepo_small', 'gene_expression', or 'all'
 
     Returns:
         Dictionary with source as key and list of dataset names as value.
     """
     available = {}
 
-    if source in ('ucimlrepo', 'all'):
-        if UCIMLREPO_DIR.exists():
-            available['ucimlrepo'] = [f.stem for f in UCIMLREPO_DIR.glob("*.csv")]
+    if source in ('ucimlrepo', 'ucimlrepo_normal', 'all'):
+        normal_dir = UCIMLREPO_DIR / "normal_size_tables"
+        if normal_dir.exists():
+            available['ucimlrepo_normal'] = [f.stem for f in normal_dir.glob("*.csv")]
         else:
-            available['ucimlrepo'] = []
+            available['ucimlrepo_normal'] = []
+
+    if source in ('ucimlrepo', 'ucimlrepo_small', 'all'):
+        small_dir = UCIMLREPO_DIR / "small_size_tables"
+        if small_dir.exists():
+            available['ucimlrepo_small'] = [f.stem for f in small_dir.glob("*.csv")]
+        else:
+            available['ucimlrepo_small'] = []
 
     if source in ('gene_expression', 'all'):
         if GENE_EXPRESSION_DIR.exists():
