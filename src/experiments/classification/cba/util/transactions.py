@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from src.algorithm.cba.data_structures.transaction_db import TransactionDB
+from src.experiments.classification.cba.data_structures.transaction_db import TransactionDB
 
 
 def transactiondb_to_dataframe(transactionDB: TransactionDB):

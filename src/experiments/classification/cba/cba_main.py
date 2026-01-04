@@ -2,10 +2,10 @@
 
 import time
 
-from src.algorithm.cba.algorithms.m1algorithm import M1Algorithm
-from src.algorithm.cba.algorithms.m2algorithm import M2Algorithm
-from src.algorithm.cba.algorithms.rule_generation import generateCARs, createCARs, top_rules
-from src.algorithm.cba.data_structures.transaction_db import TransactionDB
+from src.experiments.classification.cba.algorithms.m1algorithm import M1Algorithm
+from src.experiments.classification.cba.algorithms.m2algorithm import M2Algorithm
+from src.experiments.classification.cba.algorithms.rule_generation import generateCARs, createCARs, top_rules
+from src.experiments.classification.cba.data_structures.transaction_db import TransactionDB
 
 
 class CBA:

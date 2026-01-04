@@ -14,15 +14,16 @@ from datetime import datetime
 
 from sap_rpt_oss import SAP_RPT_OSS_Classifier
 
-from src.utils.aerial import prepare_categorical_data
-from src.utils.aerial.data_prep import add_gaussian_noise
-from src.utils.aerial.test_matrix import generate_aerial_test_matrix
-from src.utils.aerial.rule_extraction import extract_rules_from_reconstruction
+from src.utils.data_prep import prepare_categorical_data, add_gaussian_noise
+from src.utils.test_matrix import generate_test_matrix
+from src.utils.rule_extraction import extract_rules_from_reconstruction
 from src.utils import (
     get_ucimlrepo_datasets,
     calculate_rule_metrics,
     set_seed,
     generate_seed_sequence,
+    save_rules,
+    convert_metrics_to_stats,
 )
 
 
@@ -128,7 +129,7 @@ def contexttab_rule_learning(dataset, max_antecedents=2, ant_similarity=0.5,
     print(f"Number of features: {len(classes_per_feature)}")
     print(f"Classes per feature: {classes_per_feature}")
 
-    test_matrix, test_descriptions, feature_value_indices = generate_aerial_test_matrix(
+    test_matrix, test_descriptions, feature_value_indices = generate_test_matrix(
         n_features=len(classes_per_feature),
         classes_per_feature=classes_per_feature,
         max_antecedents=max_antecedents,
@@ -248,13 +249,26 @@ if __name__ == "__main__":
             if torch.cuda.is_available():
                 print(f"Peak GPU Memory: {peak_gpu_memory_mb:.2f} MB")
 
-            # Calculate metrics
+            # Calculate metrics and save rules
             if len(extracted_rules) > 0:
                 rules_with_metrics, avg_metrics = calculate_rule_metrics(
                     rules=extracted_rules,
                     data=original_data,
                     feature_names=feature_names
                 )
+
+                # Convert to stats format
+                stats = convert_metrics_to_stats(avg_metrics)
+
+                # Save rules to JSON (for CBA/CORELS classification later)
+                rules_file = save_rules(
+                    rules=rules_with_metrics,
+                    stats=stats,
+                    dataset_name=dataset_name,
+                    method_name="contexttab",
+                    seed=run_seed
+                )
+                print(f"Rules saved to {rules_file}")
 
                 print(f"  Support: {avg_metrics['support']:.4f}")
                 print(f"  Confidence: {avg_metrics['confidence']:.4f}")

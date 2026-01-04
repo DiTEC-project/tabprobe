@@ -36,7 +36,7 @@ from src.experiments.rule_mining.tabpfn_experiments import tabpfn_rule_learning
 from src.experiments.rule_mining.tabdpt_experiments import tabdpt_rule_learning, filter_single_value_columns
 
 from src.utils import get_ucimlrepo_datasets, set_seed, generate_seed_sequence
-from src.utils.aerial import prepare_categorical_data
+from src.utils.data_prep import prepare_categorical_data
 
 
 def select_features_for_target_columns(dataset, classes_per_feature, target_n_columns):

@@ -92,7 +92,7 @@ def generate_seed_sequence(base_seed: int, n_runs: int) -> List[int]:
 
     # Generate additional seeds (avoid duplicates)
     while len(seeds) < n_runs:
-        new_seed = rng.randint(0, 2**31 - 1)
+        new_seed = int(rng.randint(0, 2**31 - 1))
         if new_seed not in seeds:
             seeds.append(new_seed)
 

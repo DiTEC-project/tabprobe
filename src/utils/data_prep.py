@@ -1,7 +1,7 @@
 """
-Data preparation utilities for Aerial.
+Data preparation utilities.
 
-This module contains functions for preparing categorical data for use with Aerial models.
+This module contains functions for preparing categorical data for rule mining.
 """
 
 import numpy as np

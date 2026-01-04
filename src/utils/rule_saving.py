@@ -10,6 +10,23 @@ import numpy as np
 from typing import List, Dict, Any
 
 
+class NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy and pandas types."""
+
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.str_):
+            return str(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif hasattr(obj, 'item'):
+            return obj.item()
+        return super().default(obj)
+
+
 def strip_rule_to_essentials(rule: Dict[str, Any]) -> Dict[str, Any]:
     """
     Strip rule down to essential fields needed for CBA/CORELS.
@@ -91,12 +108,12 @@ def save_rules(rules: List[Dict], stats: Dict[str, float], dataset_name: str,
     }
 
     with open(output_file, 'w') as f:
-        json.dump(data, f, indent=2)
+        json.dump(data, f, indent=2, cls=NumpyEncoder)
 
     return output_file
 
 
-def load_rules(dataset_name: str, method_name: str, seed: int,
+def load_rules(dataset_name: str, method_name: str, seed: int = None,
                output_dir: str = "out/rules") -> Dict[str, Any]:
     """
     Load rules from JSON file.
@@ -104,13 +121,16 @@ def load_rules(dataset_name: str, method_name: str, seed: int,
     Args:
         dataset_name: Name of dataset
         method_name: Name of method
-        seed: Random seed
+        seed: Random seed (None for deterministic methods like FP-Growth)
         output_dir: Base output directory
 
     Returns:
         Dictionary with rules and metrics
     """
-    rule_file = os.path.join(output_dir, method_name, dataset_name, f"seed_{seed}.json")
+    if seed is None:
+        rule_file = os.path.join(output_dir, method_name, dataset_name, "rules.json")
+    else:
+        rule_file = os.path.join(output_dir, method_name, dataset_name, f"seed_{seed}.json")
 
     with open(rule_file, 'r') as f:
         return json.load(f)
@@ -141,7 +161,7 @@ def calculate_fpgrowth_calibration_threshold(dataset_name: str, reference_method
 
     if not os.path.exists(method_dir):
         raise ValueError(f"No rules found for {reference_method} on {dataset_name}. "
-                        f"Run {reference_method} experiments first.")
+                         f"Run {reference_method} experiments first.")
 
     # Load all rule files for this dataset
     all_rules = []
@@ -182,9 +202,9 @@ def calculate_fpgrowth_calibration_threshold(dataset_name: str, reference_method
 
 
 def save_fpgrowth_calibration(dataset_name: str, threshold: float,
-                               reference_method: str = "aerial",
-                               coverage_percentage: float = 0.9,
-                               output_dir: str = "out/rules") -> str:
+                              reference_method: str = "aerial",
+                              coverage_percentage: float = 0.9,
+                              output_dir: str = "out/rules") -> str:
     """
     Save FP-Growth calibration threshold to file.
 
@@ -208,17 +228,17 @@ def save_fpgrowth_calibration(dataset_name: str, threshold: float,
         'reference_method': reference_method,
         'coverage_percentage': coverage_percentage,
         'min_support_threshold': threshold,
-        'description': f'Minimum support threshold for FP-Growth to cover {coverage_percentage*100:.0f}% of {reference_method} rules'
+        'description': f'Minimum support threshold for FP-Growth to cover {coverage_percentage * 100:.0f}% of {reference_method} rules'
     }
 
     with open(calibration_file, 'w') as f:
-        json.dump(calibration_data, f, indent=2)
+        json.dump(calibration_data, f, indent=2, cls=NumpyEncoder)
 
     return calibration_file
 
 
 def load_fpgrowth_calibration(dataset_name: str, reference_method: str = "aerial",
-                               output_dir: str = "out/rules") -> float:
+                              output_dir: str = "out/rules") -> float:
     """
     Load FP-Growth calibration threshold from file.
 
@@ -235,7 +255,7 @@ def load_fpgrowth_calibration(dataset_name: str, reference_method: str = "aerial
 
     if not os.path.exists(calibration_file):
         raise ValueError(f"Calibration file not found: {calibration_file}. "
-                        f"Run {reference_method} experiments first and calculate calibration.")
+                         f"Run {reference_method} experiments first and calculate calibration.")
 
     with open(calibration_file, 'r') as f:
         data = json.load(f)

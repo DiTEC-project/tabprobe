@@ -2,9 +2,9 @@
 
 from collections import Counter
 
-from src.algorithm.cba.data_structures.car import ClassAssocationRule
-from src.algorithm.cba.data_structures.antecedent import Antecedent
-from src.algorithm.cba.data_structures.consequent import Consequent
+from src.experiments.classification.cba.data_structures.car import ClassAssocationRule
+from src.experiments.classification.cba.data_structures.antecedent import Antecedent
+from src.experiments.classification.cba.data_structures.consequent import Consequent
 
 
 class RuleBuilderAlgorithm:
