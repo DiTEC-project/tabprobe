@@ -2,35 +2,7 @@
 TabICL-based Rule Extraction Baseline
 
 This is a BASELINE implementation/adaptation of the tabular foundation model TabICL to do association
-rule mining from tabular data using a Aerial-like logic (association by reconstruction/prediction success)
-
-Adaptation Strategy:
-- For each feature: Train TabICL to predict that feature from all others
-- Add Gaussian noise to context (matching PyAerial's denoising approach)
-- Apply to test vectors (antecedent patterns) to get reconstructions
-- Extract rules using Aerial's rule extraction logic
-
-Limitations of this approach:
-1. TabICL is supervised (needs discrete labels), while rule learning is unsupervised
-2. We must predict each feature independently, losing holistic pattern reconstruction
-3. Much slower than Aerial (must retrain/fit for each feature)
-4. Quality expected to be inferior to specialized rule learning models
-5. CRITICAL: Antecedent validation is fundamentally broken (see below)
-
-FUNDAMENTAL INCOMPATIBILITY:
-PyAerial: "Given marked features A, reconstruct ALL features"
-          - Antecedents A are in the query
-          - Can validate A reconstructs well
-
-TabICL:   "Given all features EXCEPT i, predict feature i"
-          - When i ∈ A (i is antecedent), we MUST remove it
-          - Cannot validate antecedent reconstruction!
-
-Result: Consequent prediction works (✓), antecedent validation fails (✗)
-        Rules A -> C can be extracted, but lower quality (no antecedent filtering)
-
-This baseline serves to justify the need for custom tabular foundation models
-specifically designed for unsupervised rule discovery.
+rule mining from tabular data
 """
 import time
 import os
@@ -41,13 +13,11 @@ import torch
 
 from tabicl import TabICLClassifier
 
-from src.utils.aerial import prepare_categorical_data
-from src.utils.aerial.data_prep import add_gaussian_noise
-from src.utils.aerial.test_matrix import generate_aerial_test_matrix
-from src.utils.aerial.rule_extraction import extract_rules_from_reconstruction
+from src.utils.data_prep import prepare_categorical_data, add_gaussian_noise
+from src.utils.test_matrix import generate_test_matrix
+from src.utils.rule_extraction import extract_rules_from_reconstruction
 from src.utils import (
     get_ucimlrepo_datasets,
-    get_gene_expression_datasets,
     calculate_rule_metrics,
     set_seed,
     generate_seed_sequence,
@@ -59,24 +29,9 @@ from src.utils import (
 def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
                                     feature_value_indices, n_samples=None, noise_factor=0.5):
     """
-    Adapt TabICL for unsupervised rule learning following Aerial's ALL-AT-ONCE reconstruction logic.
-
-    Aerial's Approach:
-    - For a query with marked features A, pass it through the autoencoder ONCE
-    - Get reconstruction probabilities for ALL features (both A and F/A) simultaneously
-    - Check if A reconstructs well (antecedent validation)
-    - Check which features in F/A reconstruct well (consequent extraction)
-
-    PyAerial marks features A and looks at reconstruction of F/A. If reconstruction is successful
-    based on both antecedent and consequent similarity thresholds for features C, then A -> C.
-
-    Problem: TabICL is supervised (needs y) and predicts ONE label at a time,
-    while Aerial reconstructs ALL features at once.
-
-    Solution:
+    Adapt TabICL for unsupervised rule learning
     - Train one model per feature to reconstruct that feature from all other features
     - For each query, predict ALL features to simulate "all-at-once" reconstruction
-    - This mimics Aerial's behavior: given marked features A, what are probabilities for all features?
 
     Args:
         tabicl_model: Pretrained TabICL model
@@ -191,7 +146,7 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
     # Use equal probabilities for unmarked features (NOT zeros)
     # Since we add noise to the context, TabICL will see values between 0 and 1,
     # making [0.33, 0.33, 0.33] patterns more natural and consistent with the training distribution
-    test_matrix, test_descriptions, feature_value_indices = generate_aerial_test_matrix(
+    test_matrix, test_descriptions, feature_value_indices = generate_test_matrix(
         n_features=len(classes_per_feature),
         classes_per_feature=classes_per_feature,
         max_antecedents=max_antecedents,
@@ -313,17 +268,18 @@ if __name__ == "__main__":
             if torch.cuda.is_available():
                 print(f"Peak GPU Memory: {peak_gpu_memory_mb:.2f} MB")
 
-            # Calculate metrics
+            # Calculate metrics and save rules
             if len(extracted_rules) > 0:
                 rules_with_metrics, avg_metrics = calculate_rule_metrics(
-                    rules=rules_with_metrics,
+                    rules=extracted_rules,
                     data=original_data,
                     feature_names=feature_names
                 )
 
-                # Save rules to JSON (for CBA/CORELS classification later)
+                # Convert to stats format
                 stats = convert_metrics_to_stats(avg_metrics)
-                }
+
+                # Save rules to JSON (for CBA/CORELS classification later)
                 rules_file = save_rules(
                     rules=rules_with_metrics,
                     stats=stats,

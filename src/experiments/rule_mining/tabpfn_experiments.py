@@ -42,13 +42,11 @@ import torch
 from tabpfn import TabPFNClassifier
 from tabpfn_extensions.many_class import ManyClassClassifier
 
-from src.utils.aerial import prepare_categorical_data
-from src.utils.aerial.data_prep import add_gaussian_noise
-from src.utils.aerial.test_matrix import generate_aerial_test_matrix
-from src.utils.aerial.rule_extraction import extract_rules_from_reconstruction
+from src.utils.data_prep import prepare_categorical_data, add_gaussian_noise
+from src.utils.test_matrix import generate_test_matrix
+from src.utils.rule_extraction import extract_rules_from_reconstruction
 from src.utils import (
     get_ucimlrepo_datasets,
-    get_gene_expression_datasets,
     calculate_rule_metrics,
     set_seed,
     generate_seed_sequence,
@@ -203,7 +201,7 @@ def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100,
     # Use equal probabilities for unmarked features (NOT zeros)
     # Since we add noise to the context, TabPFN will see values between 0 and 1,
     # making [0.33, 0.33, 0.33] patterns more natural and consistent with the training distribution
-    test_matrix, test_descriptions, feature_value_indices = generate_aerial_test_matrix(
+    test_matrix, test_descriptions, feature_value_indices = generate_test_matrix(
         n_features=len(classes_per_feature),
         classes_per_feature=classes_per_feature,
         max_antecedents=max_antecedents,
@@ -275,7 +273,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="small")
+    datasets = get_ucimlrepo_datasets(size="normal")
 
     # Create output directory
     os.makedirs("out", exist_ok=True)
@@ -334,7 +332,7 @@ if __name__ == "__main__":
             if torch.cuda.is_available():
                 print(f"Peak GPU Memory: {peak_gpu_memory_mb:.2f} MB")
 
-            # Calculate metrics
+            # Calculate metrics and save rules
             if len(extracted_rules) > 0:
                 rules_with_metrics, avg_metrics = calculate_rule_metrics(
                     rules=extracted_rules,
@@ -342,8 +340,10 @@ if __name__ == "__main__":
                     feature_names=feature_names
                 )
 
-                # Save rules to JSON (for CBA/CORELS classification later)
+                # Convert to stats format
                 stats = convert_metrics_to_stats(avg_metrics)
+
+                # Save rules to JSON (for CBA/CORELS classification later)
                 rules_file = save_rules(
                     rules=rules_with_metrics,
                     stats=stats,

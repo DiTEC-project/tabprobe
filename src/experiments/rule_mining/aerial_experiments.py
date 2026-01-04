@@ -88,27 +88,68 @@ def aerial_rule_learning(dataset, max_antecedents=2, ant_similarity=0.5, batch_s
     return rules, stats
 
 
+def get_dataset_parameters(dataset_name, dataset_size):
+    """
+    Get dataset-specific training parameters.
+
+    Args:
+        dataset_name: Name of the dataset
+        dataset_size: Size category ('normal' or 'small')
+
+    Returns:
+        dict: Parameters (batch_size, layer_dims, epochs)
+    """
+    # Dataset-specific parameter overrides
+    DATASET_PARAMS = {
+        'breast_cancer': {
+            'batch_size': 2,
+            'layer_dims': [4],
+            'epochs': 2
+        },
+        'congressional_voting': {
+            'batch_size': 4,
+            'layer_dims': [2],
+            'epochs': 2
+        }
+    }
+
+    # Default parameters by dataset size
+    DEFAULT_PARAMS = {
+        'normal': {
+            'batch_size': 64,
+            'layer_dims': [4],
+            'epochs': 2
+        },
+        'small': {
+            'batch_size': 2,
+            'layer_dims': [4],
+            'epochs': 10
+        }
+    }
+
+    # Check for dataset-specific override first
+    if dataset_name in DATASET_PARAMS:
+        return DATASET_PARAMS[dataset_name]
+
+    # Otherwise use default for the dataset size
+    return DEFAULT_PARAMS.get(dataset_size, DEFAULT_PARAMS['normal'])
+
+
 # Main execution
 if __name__ == "__main__":
     print("=" * 80)
     print("PyAerial Rule Learning Experiments")
     print("=" * 80)
 
-    # Parameters
+    # Common parameters
     n_runs = 10
     max_antecedents = 2
     ant_similarity = 0.5
     cons_similarity = 0.8
-    epochs = 3
-    layer_dims = [2]
-    batch_size = 2
     base_seed = 42  # Base seed for reproducibility
 
-    # Parameter settings
-    # "normal_size_tables": 64 batch_size, 4 layer_dims, 2 epochs --> all except breast cancer and congressional voting
-    #   breast_cancer: 2 batch_size, 2 layer_dims, 3 epochs
-    #   congressional_voting: 4 batch_size, 2 layer_dims, 2 epochs
-    # "small_size_tables": 64 batch_size, 4 layer_dims, 2 epochs
+    # Dataset size: 'normal' or 'small'
+    dataset_size = "small"
 
     # Generate seed sequence for all runs
     print(f"\nGenerating seed sequence from base_seed={base_seed}...")
@@ -117,9 +158,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="normal", names=[
-        'breast_cancer',
-    ])
+    datasets = get_ucimlrepo_datasets(size=dataset_size)
 
     # Create output directory
     os.makedirs("out", exist_ok=True)
@@ -127,6 +166,7 @@ if __name__ == "__main__":
     # Results storage - store all individual runs
     all_individual_results = []
     all_average_results = []
+    all_dataset_params = []  # Track parameters used for each dataset
 
     # Run experiments for each dataset
     for dataset_info in datasets:
@@ -137,6 +177,26 @@ if __name__ == "__main__":
         print(f"Dataset: {dataset_name}")
         print("=" * 80)
         print(f"Shape: {dataset.shape}")
+
+        # Get dataset-specific parameters
+        params = get_dataset_parameters(dataset_name, dataset_size)
+        batch_size = params['batch_size']
+        layer_dims = params['layer_dims']
+        epochs = params['epochs']
+
+        print(f"Using dataset-specific parameters:")
+        print(f"  batch_size={batch_size}, layer_dims={layer_dims}, epochs={epochs}")
+
+        # Store parameters for this dataset
+        all_dataset_params.append({
+            'dataset': dataset_name,
+            'batch_size': batch_size,
+            'layer_dims': str(layer_dims),
+            'epochs': epochs,
+            'max_antecedents': max_antecedents,
+            'ant_similarity': ant_similarity,
+            'cons_similarity': cons_similarity
+        })
 
         # Storage for this dataset's runs
         dataset_runs = []
@@ -290,19 +350,19 @@ if __name__ == "__main__":
         average_df = pd.DataFrame(all_average_results)
         average_df.to_excel(writer, sheet_name='Average Results', index=False)
 
-        # Sheet 3: Parameters
-        params_df = pd.DataFrame([{
+        # Sheet 3: Dataset-specific parameters
+        dataset_params_df = pd.DataFrame(all_dataset_params)
+        dataset_params_df.to_excel(writer, sheet_name='Dataset Parameters', index=False)
+
+        # Sheet 4: Common parameters
+        common_params_df = pd.DataFrame([{
             'n_runs': n_runs,
             'base_seed': base_seed,
-            'max_antecedents': max_antecedents,
-            'ant_similarity': ant_similarity,
-            'cons_similarity': cons_similarity,
-            'epochs': epochs,
-            'layer_dims': str(layer_dims)
+            'dataset_size': dataset_size
         }])
-        params_df.to_excel(writer, sheet_name='Parameters', index=False)
+        common_params_df.to_excel(writer, sheet_name='Common Parameters', index=False)
 
-        # Sheet 4: Seed Sequence (for reproducibility)
+        # Sheet 5: Seed Sequence (for reproducibility)
         seeds_df = pd.DataFrame({
             'run': list(range(1, n_runs + 1)),
             'seed': seed_sequence
@@ -313,8 +373,9 @@ if __name__ == "__main__":
     print(f"Results saved to {output_filename}")
     print(f"  - Sheet 1: Individual Results (all {n_runs * len(datasets)} runs)")
     print(f"  - Sheet 2: Average Results (per dataset)")
-    print(f"  - Sheet 3: Parameters (including base_seed={base_seed})")
-    print(f"  - Sheet 4: Seeds (seed sequence for reproducibility)")
+    print(f"  - Sheet 3: Dataset Parameters (batch_size, layer_dims, epochs per dataset)")
+    print(f"  - Sheet 4: Common Parameters (n_runs, base_seed, dataset_size)")
+    print(f"  - Sheet 5: Seeds (seed sequence for reproducibility)")
     print("=" * 80)
 
     # Calculate and save FP-Growth calibration thresholds
