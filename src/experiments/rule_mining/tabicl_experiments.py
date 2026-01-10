@@ -119,7 +119,7 @@ def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
 
 
 def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
-                         ant_similarity=0.5, cons_similarity=0.8, random_state=42):
+                         ant_similarity=0.5, cons_similarity=0.8, random_state=42, n_estimators=8):
     """
     End-to-end unsupervised rule learning using TabICL.
 
@@ -130,7 +130,7 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
         ant_similarity: Antecedent threshold
         cons_similarity: Consequent threshold
         random_state: Random seed for TabICL model (for reproducibility)
-
+        n_estimators: number of ensembles
     Returns:
         rules: List of extracted association rules
     """
@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="small")
+    datasets = get_ucimlrepo_datasets(size="small", names=['fertility'])
 
     # Create output directory
     os.makedirs("out", exist_ok=True)

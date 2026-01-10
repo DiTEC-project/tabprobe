@@ -2,6 +2,7 @@
 
 import subprocess
 import time
+import os
 import numpy as np
 
 
@@ -9,16 +10,30 @@ def create_corels_input_files(rules, labels, dataset_name):
     """
     CORELS expect frequent itemsets and their occurrences as an input file.
     This function creates those files.
+
+    Args:
+        rules: List of itemset rows (itemset_string + occurrence vector)
+        labels: Class labels for training samples (0/1 array)
+        dataset_name: Name of dataset
     """
     corels_train_dataset_name = dataset_name.lower().replace(" ", "_")
-    with open("src/experiments/classification/corels/data/" + corels_train_dataset_name + ".out", "w") as file:
+
+    data_dir = "src/experiments/classification/corels/data"
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Write .out file (feature itemsets)
+    with open(os.path.join(data_dir, corels_train_dataset_name + ".out"), "w") as file:
         for row in rules:
             file.write(" ".join(map(str, row)) + "\n")
 
-    with open("src/experiments/classification/corels/data/" + corels_train_dataset_name + ".label", "w") as file:
-        for key in labels:
-            file.write("{" + key + ":Yes} ")
-            file.write(" ".join(map(str, labels[key])) + "\n")
+    with open(os.path.join(data_dir, corels_train_dataset_name + ".label"), "w") as file:
+        # Class 0 rule: shows which samples have label 0
+        class_0_vector = [1 if label == 0 else 0 for label in labels]
+        file.write("{class:=0} " + " ".join(map(str, class_0_vector)) + "\n")
+
+        # Class 1 rule: shows which samples have label 1
+        class_1_vector = [1 if label == 1 else 0 for label in labels]
+        file.write("{class:=1} " + " ".join(map(str, class_1_vector)) + "\n")
 
 
 def run_corels(dataset_name):
@@ -32,18 +47,20 @@ def run_corels(dataset_name):
     parameters = ["-r", "0.015", "-c", "2", "-p", "1", "../data/" + dataset_name + ".out",
                   "../data/" + dataset_name + ".label"]
 
+    corels_src_dir = "src/experiments/classification/corels/src"
+
     try:
         start = time.time()
         result = subprocess.run([command] + parameters, capture_output=True, text=True, check=True,
-                                cwd="./src/experiments/classification/corels/src")
+                                cwd=corels_src_dir)
         exec_time = time.time() - start
         optimal_rule_list_file = None
         time.sleep(1)
         # find where the optimal rule is stored by looking at CORELS' stdout
         for line in result.stdout.splitlines():
             if line.startswith("writing optimal rule list to: "):
-                optimal_rule_list_file = "src/experiments/classification/corels/src/" + line[
-                    len("writing optimal rule list to: "):]
+                optimal_rule_list_file = os.path.join(corels_src_dir, line[
+                    len("writing optimal rule list to: "):])
                 break
         if optimal_rule_list_file:
             with open(optimal_rule_list_file, "r") as file:
@@ -109,13 +126,16 @@ def test_corels_model(model, test_X, test_y):
     test_X.reset_index(drop=True, inplace=True)
     test_y.reset_index(drop=True, inplace=True)
 
+    # Normalize column names to match CORELS format (spaces → dashes)
+    test_X_normalized = test_X.rename(columns=lambda x: x.replace(' ', '-'))
+
     default_rule = next((rule[-1][1] for rule in model if rule[0][0] == 'default'), None)
 
     # Initialize a list to store whether the model holds for each row
     model_holds = []
 
     # Iterate through each row in the features dataframe
-    for i, feature_row in test_X.iterrows():
+    for i, feature_row in test_X_normalized.iterrows():
         actual_label = test_y.iloc[i, 0]  # Get the actual label for the current row
         predicted_label = None
 

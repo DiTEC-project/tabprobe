@@ -268,6 +268,7 @@ if __name__ == "__main__":
     # Parameters
     max_len = 2  # Max antecedents (matching other experiments)
     min_confidence = 0.8
+    min_support = 0.3
     reference_method = "aerial"
 
     # Load datasets
@@ -292,16 +293,16 @@ if __name__ == "__main__":
 
         # Load calibrated threshold from Aerial
         print(f"\nLoading calibrated threshold from {reference_method}...")
-        try:
-            min_support = load_fpgrowth_calibration(
-                dataset_name=dataset_name,
-                reference_method=reference_method
-            )
-            print(f"Calibrated min_support: {min_support:.4f}")
-        except ValueError as e:
-            print(f"ERROR: {e}")
-            print(f"Skipping {dataset_name}. Run {reference_method} experiments first.")
-            continue
+        # try:
+        #     min_support = load_fpgrowth_calibration(
+        #         dataset_name=dataset_name,
+        #         reference_method=reference_method
+        #     )
+        #     print(f"Calibrated min_support: {min_support:.4f}")
+        # except ValueError as e:
+        #     print(f"ERROR: {e}")
+        #     print(f"Skipping {dataset_name}. Run {reference_method} experiments first.")
+        #     continue
 
         # Track CPU memory
         process = psutil.Process()
@@ -309,7 +310,6 @@ if __name__ == "__main__":
         mem_before = process.memory_info().rss / 1024 ** 2
 
         start_time = time.time()
-
         # Run FP-Growth (once, deterministically)
         extracted_rules, stats = fpgrowth_rule_learning(
             dataset=dataset,

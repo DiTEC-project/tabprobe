@@ -26,20 +26,24 @@ UCIMLREPO_NORMAL_DATASETS = [
 ]
 
 UCIMLREPO_SMALL_DATASETS = [
-    'lung_cancer',
+    # 'lung_cancer',
     'hepatitis',
-    'breast_cancer_coimbra',
+    # 'breast_cancer_coimbra',
     'cervical_cancer_behavior_risk',
     'autism_screening_adolescent',
+    'acute_inflammations',
+    'fertility',
 ]
 
 # Datasets that need discretization (have numerical features)
 DATASETS_TO_DISCRETIZE = {
     'spambase',
     'hepatitis',
-    'breast_cancer_coimbra',
+    # 'breast_cancer_coimbra',
     'cervical_cancer_behavior_risk',
     'autism_screening_adolescent',
+    'acute_inflammations',
+    'fertility',
 }
 
 

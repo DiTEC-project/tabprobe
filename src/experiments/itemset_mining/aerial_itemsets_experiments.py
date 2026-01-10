@@ -1,11 +1,10 @@
 """
-PyAerial Rule Learning Experiments
+PyAerial Frequent Itemset Mining Experiments
 
-This module runs association rule mining experiments using PyAerial.
+This module runs frequent itemset mining experiments using PyAerial.
 
 PyAerial learns to reconstruct categorical data through a neural autoencoder,
-then extracts rules by testing which feature combinations lead to successful
-reconstruction of other features.
+then extracts frequent itemsets using the generate_frequent_itemsets() function.
 """
 import time
 import os
@@ -20,29 +19,28 @@ from src.utils import (
     get_ucimlrepo_datasets,
     set_seed,
     generate_seed_sequence,
-    save_rules,
-    calculate_and_save_all_calibrations,
+    save_itemsets,
+    calculate_and_save_all_itemset_calibrations,
 )
 
 
-def aerial_rule_learning(dataset, max_antecedents=2, ant_similarity=0.5, batch_size=None,
-                         cons_similarity=0.8, layer_dims=None, epochs=2, random_state=42,
-                         quality_metrics=['support', 'confidence', 'zhangs_metric', 'interestingness']):
+def aerial_itemset_learning(dataset, max_length=3, similarity=0.5, batch_size=None,
+                             layer_dims=None, epochs=2, random_state=42):
     """
-    End-to-end unsupervised rule learning using PyAerial.
+    End-to-end unsupervised frequent itemset learning using PyAerial.
 
     Args:
         dataset: DataFrame with categorical features
-        max_antecedents: Maximum antecedents per rule
-        ant_similarity: Antecedent similarity threshold
-        cons_similarity: Consequent similarity threshold
+        max_length: Maximum itemset length (default: 3)
+        similarity: Similarity threshold for itemset validation (default: 0.5)
         layer_dims: Hidden layer dimensions for autoencoder (default: auto)
+        batch_size: Batch size for training (default: auto)
         epochs: Number of training epochs
         random_state: Random seed for reproducibility
 
     Returns:
-        rules: List of extracted association rules
-        stats: Statistics from pyaerial (average_support, average_confidence, etc.)
+        itemsets: List of extracted frequent itemsets
+        stats: Statistics from pyaerial (itemset_count, average_support)
     """
     # Set seed for PyTorch (aerial uses PyTorch internally)
     torch.manual_seed(random_state)
@@ -56,7 +54,7 @@ def aerial_rule_learning(dataset, max_antecedents=2, ant_similarity=0.5, batch_s
 
     # Train the autoencoder
     print(f"\nTraining Aerial autoencoder...")
-    print(f"  epochs={epochs}, layer_dims={layer_dims}")
+    print(f"  epochs={epochs}, layer_dims={layer_dims}, batch_size={batch_size}")
     trained_autoencoder = model.train(
         dataset,
         layer_dims=layer_dims,
@@ -64,28 +62,24 @@ def aerial_rule_learning(dataset, max_antecedents=2, ant_similarity=0.5, batch_s
         epochs=epochs
     )
 
-    # Extract rules
-    print(f"\nExtracting rules...")
-    print(f"  max_antecedents={max_antecedents}")
-    print(f"  ant_similarity={ant_similarity}")
-    print(f"  cons_similarity={cons_similarity}")
+    # Extract frequent itemsets using Aerial's native function
+    print(f"\nExtracting frequent itemsets...")
+    print(f"  max_length={max_length}")
+    print(f"  similarity={similarity}")
 
-    result = rule_extraction.generate_rules(
+    result = rule_extraction.generate_frequent_itemsets(
         trained_autoencoder,
-        ant_similarity=ant_similarity,
-        cons_similarity=cons_similarity,
-        max_antecedents=max_antecedents,
-        quality_metrics=quality_metrics
+        similarity=similarity,
+        max_length=max_length
     )
 
-    rules = result['rules']
+    itemsets = result['itemsets']
     stats = result['statistics']
 
-    print(f"\n{len(rules)} rules found!")
-    print(f"  PyAerial stats: avg_support={stats.get('average_support', 0):.4f}, "
-          f"avg_confidence={stats.get('average_confidence', 0):.4f}")
+    print(f"\n{len(itemsets)} frequent itemsets found!")
+    print(f"  PyAerial stats: avg_support={stats.get('average_support', 0):.4f}")
 
-    return rules, stats
+    return itemsets, stats
 
 
 def get_dataset_parameters(dataset_name, dataset_size):
@@ -110,11 +104,6 @@ def get_dataset_parameters(dataset_name, dataset_size):
             'batch_size': 4,
             'layer_dims': [2],
             'epochs': 2
-        },
-        'cervical_cancer_behavior_risk': {
-            'batch_size': 1,
-            'layer_dims': [8],
-            'epochs': 20
         }
     }
 
@@ -143,14 +132,13 @@ def get_dataset_parameters(dataset_name, dataset_size):
 # Main execution
 if __name__ == "__main__":
     print("=" * 80)
-    print("PyAerial Rule Learning Experiments")
+    print("PyAerial Frequent Itemset Mining Experiments")
     print("=" * 80)
 
     # Common parameters
     n_runs = 10
-    max_antecedents = 2
-    ant_similarity = 0.5
-    cons_similarity = 0.8
+    max_length = 3  # Maximum itemset length
+    similarity = 0.5  # Similarity threshold
     base_seed = 42  # Base seed for reproducibility
 
     # Dataset size: 'normal' or 'small'
@@ -163,10 +151,10 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size=dataset_size, names=['fertility'])
+    datasets = get_ucimlrepo_datasets(size=dataset_size)
 
     # Create output directory
-    os.makedirs("out", exist_ok=True)
+    os.makedirs("out/frequent_itemsets", exist_ok=True)
 
     # Results storage - store all individual runs
     all_individual_results = []
@@ -198,9 +186,8 @@ if __name__ == "__main__":
             'batch_size': batch_size,
             'layer_dims': str(layer_dims),
             'epochs': epochs,
-            'max_antecedents': max_antecedents,
-            'ant_similarity': ant_similarity,
-            'cons_similarity': cons_similarity
+            'max_length': max_length,
+            'similarity': similarity
         })
 
         # Storage for this dataset's runs
@@ -220,11 +207,10 @@ if __name__ == "__main__":
 
             start_time = time.time()
 
-            extracted_rules, stats = aerial_rule_learning(
+            extracted_itemsets, stats = aerial_itemset_learning(
                 dataset=dataset,
-                max_antecedents=max_antecedents,
-                ant_similarity=ant_similarity,
-                cons_similarity=cons_similarity,
+                max_length=max_length,
+                similarity=similarity,
                 layer_dims=layer_dims,
                 epochs=epochs,
                 random_state=run_seed,
@@ -240,57 +226,42 @@ if __name__ == "__main__":
                 peak_gpu_memory_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
 
             print(f"\nRun {run_idx + 1} completed in {elapsed_time:.2f} seconds")
-            print(f"Extracted {len(extracted_rules)} rules")
+            print(f"Extracted {len(extracted_itemsets)} frequent itemsets")
             if torch.cuda.is_available():
                 print(f"Peak GPU Memory: {peak_gpu_memory_mb:.2f} MB")
 
-            # Save rules to JSON (for CBA/CORELS classification later)
-            rules_file = save_rules(
-                rules=extracted_rules,
+            # Save itemsets to JSON (for CORELS classification later)
+            itemsets_file = save_itemsets(
+                itemsets=extracted_itemsets,
                 stats=stats,
                 dataset_name=dataset_name,
                 method_name="aerial",
                 seed=run_seed
             )
-            print(f"Rules saved to {rules_file}")
+            print(f"Itemsets saved to {itemsets_file}")
 
             # Use metrics from pyaerial stats
-            if len(extracted_rules) > 0:
+            if len(extracted_itemsets) > 0:
                 print(f"  Support: {stats.get('average_support', 0):.4f}")
-                print(f"  Confidence: {stats.get('average_confidence', 0):.4f}")
-                print(f"  Zhang's Metric: {stats.get('average_zhangs_metric', 0):.4f}")
-                print(f"  Interestingness: {stats.get('average_interestingness', 0):.4f}")
-                print(f"  Rule coverage: {stats.get('average_coverage', 0):.4f}")
-                print(f"  Data coverage: {stats.get('data_coverage', 0):.4f}")
 
                 # Store results for this run
                 result = {
                     'dataset': dataset_name,
                     'run': run_idx + 1,
                     'seed': run_seed,
-                    'num_rules': stats.get('rule_count', len(extracted_rules)),
+                    'num_itemsets': stats.get('itemset_count', len(extracted_itemsets)),
                     'avg_support': stats.get('average_support', 0),
-                    'avg_confidence': stats.get('average_confidence', 0),
-                    'avg_zhangs_metric': stats.get('average_zhangs_metric', 0),
-                    'avg_interestingness': stats.get('average_interestingness', 0),
-                    'avg_rule_coverage': stats.get('average_coverage', 0),
-                    'data_coverage': stats.get('data_coverage', 0),
                     'execution_time': elapsed_time,
                     'peak_gpu_memory_mb': peak_gpu_memory_mb
                 }
             else:
-                print("  WARNING: No rules extracted!")
+                print("  WARNING: No itemsets extracted!")
                 result = {
                     'dataset': dataset_name,
                     'run': run_idx + 1,
                     'seed': run_seed,
-                    'num_rules': 0,
+                    'num_itemsets': 0,
                     'avg_support': 0.0,
-                    'avg_confidence': 0.0,
-                    'avg_zhangs_metric': 0.0,
-                    'avg_interestingness': 0.0,
-                    'avg_rule_coverage': 0.0,
-                    'data_coverage': 0.0,
                     'execution_time': elapsed_time,
                     'peak_gpu_memory_mb': peak_gpu_memory_mb
                 }
@@ -299,52 +270,36 @@ if __name__ == "__main__":
             all_individual_results.append(result)
 
         # Calculate averages across runs for this dataset
-        # Only average rule metrics over runs that produced rules (>0 rules)
-        runs_with_rules = [r for r in dataset_runs if r['num_rules'] > 0]
-        n_runs_with_rules = len(runs_with_rules)
+        runs_with_itemsets = [r for r in dataset_runs if r['num_itemsets'] > 0]
+        n_runs_with_itemsets = len(runs_with_itemsets)
 
-        if n_runs_with_rules > 0:
+        if n_runs_with_itemsets > 0:
             avg_result = {
                 'dataset': dataset_name,
-                'num_rules': np.mean([r['num_rules'] for r in runs_with_rules]),
-                'avg_support': np.mean([r['avg_support'] for r in runs_with_rules]),
-                'avg_confidence': np.mean([r['avg_confidence'] for r in runs_with_rules]),
-                'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in runs_with_rules]),
-                'avg_interestingness': np.mean([r['avg_interestingness'] for r in runs_with_rules]),
-                'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in runs_with_rules]),
-                'data_coverage': np.mean([r['data_coverage'] for r in runs_with_rules]),
+                'num_itemsets': np.mean([r['num_itemsets'] for r in runs_with_itemsets]),
+                'avg_support': np.mean([r['avg_support'] for r in runs_with_itemsets]),
                 'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
                 'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
             }
         else:
             avg_result = {
                 'dataset': dataset_name,
-                'num_rules': 0,
+                'num_itemsets': 0,
                 'avg_support': 0.0,
-                'avg_confidence': 0.0,
-                'avg_zhangs_metric': 0.0,
-                'avg_interestingness': 0.0,
-                'avg_rule_coverage': 0.0,
-                'data_coverage': 0.0,
                 'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
                 'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
             }
         all_average_results.append(avg_result)
 
-        print(f"\n=== Average Results for {dataset_name} ({n_runs_with_rules}/{n_runs} runs with rules) ===")
-        print(f"  Rules: {avg_result['num_rules']:.1f}")
+        print(f"\n=== Average Results for {dataset_name} ({n_runs_with_itemsets}/{n_runs} runs with itemsets) ===")
+        print(f"  Itemsets: {avg_result['num_itemsets']:.1f}")
         print(f"  Support: {avg_result['avg_support']:.4f}")
-        print(f"  Confidence: {avg_result['avg_confidence']:.4f}")
-        print(f"  Zhang's Metric: {avg_result['avg_zhangs_metric']:.4f}")
-        print(f"  Interestingness: {avg_result['avg_interestingness']:.4f}")
-        print(f"  Rule Coverage: {avg_result['avg_rule_coverage']:.4f}")
-        print(f"  Data Coverage: {avg_result['data_coverage']:.4f}")
         print(f"  Avg Time: {avg_result['execution_time']:.2f}s")
         print(f"  Avg Peak GPU Memory: {avg_result['peak_gpu_memory_mb']:.2f} MB")
 
     # Save results to Excel with multiple sheets
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_filename = f"out/aerial_{timestamp}.xlsx"
+    output_filename = f"out/aerial_itemsets_{timestamp}.xlsx"
 
     with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
         # Sheet 1: Individual run results
@@ -383,17 +338,17 @@ if __name__ == "__main__":
     print(f"  - Sheet 5: Seeds (seed sequence for reproducibility)")
     print("=" * 80)
 
-    # Calculate and save FP-Growth calibration thresholds
+    # Calculate and save FP-Growth calibration thresholds for itemsets
     print("\n" + "=" * 80)
-    print("Calculating FP-Growth Calibration Thresholds")
+    print("Calculating FP-Growth Calibration Thresholds for Itemsets")
     print("=" * 80)
-    print("Finding minimum support thresholds for FP-Growth to cover 90% of Aerial rules...")
+    print("Finding minimum support thresholds for FP-Growth to cover 90% of Aerial itemsets...")
 
     dataset_names = [d['name'] for d in datasets]
-    thresholds = calculate_and_save_all_calibrations(
-        datasets=dataset_names,
+    calculate_and_save_all_itemset_calibrations(
+        dataset_names=dataset_names,
         reference_method="aerial",
-        coverage_percentage=0.8
+        coverage_percentage=0.9
     )
 
     print("\nFP-Growth calibration thresholds saved.")

@@ -11,6 +11,7 @@ Modules:
 - rule_extraction: Rule and itemset extraction utilities
 - rule_quality: Rule quality metrics
 - rule_saving: Rule saving and FP-Growth calibration utilities
+- itemset_saving: Itemset saving and FP-Growth calibration utilities
 - seed_utils: Seed management for reproducibility
 - test_matrix: Test matrix generation utilities
 """
@@ -33,6 +34,20 @@ from .rule_saving import (
     save_fpgrowth_calibration,
     load_fpgrowth_calibration,
     calculate_and_save_all_calibrations,
+)
+from .itemset_saving import (
+    save_itemsets,
+    load_itemsets,
+    calculate_fpgrowth_itemset_calibration_threshold,
+    save_fpgrowth_itemset_calibration,
+    load_fpgrowth_itemset_calibration,
+    calculate_and_save_all_itemset_calibrations,
+)
+from .reconstruction_cache import (
+    save_reconstruction_probs,
+    load_reconstruction_probs,
+    reconstruction_probs_exist,
+    get_cached_reconstruction_stats,
 )
 from .seed_utils import set_seed, generate_seed_sequence
 from .test_matrix import generate_test_matrix
@@ -57,6 +72,18 @@ __all__ = [
     'save_fpgrowth_calibration',
     'load_fpgrowth_calibration',
     'calculate_and_save_all_calibrations',
+    # Itemset saving
+    'save_itemsets',
+    'load_itemsets',
+    'calculate_fpgrowth_itemset_calibration_threshold',
+    'save_fpgrowth_itemset_calibration',
+    'load_fpgrowth_itemset_calibration',
+    'calculate_and_save_all_itemset_calibrations',
+    # Reconstruction probability caching
+    'save_reconstruction_probs',
+    'load_reconstruction_probs',
+    'reconstruction_probs_exist',
+    'get_cached_reconstruction_stats',
     # Seed management
     'set_seed',
     'generate_seed_sequence',

@@ -173,7 +173,7 @@ def adapt_tabpfn_for_reconstruction(tabpfn_model, context_table, query_matrix,
     return reconstruction_probs
 
 
-def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100,
+def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100, n_estimators=8,
                          ant_similarity=0.5, cons_similarity=0.8, random_state=42):
     """
     End-to-end unsupervised rule learning using TabPFN.
@@ -185,6 +185,7 @@ def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100,
         ant_similarity: Antecedent threshold
         cons_similarity: Consequent threshold
         random_state: Random seed for TabPFN model (for reproducibility)
+        n_estimators
 
     Returns:
         rules: List of extracted association rules
@@ -211,13 +212,8 @@ def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100,
     print(f"\nTest matrix shape: {test_matrix.shape}")
     print(f"Number of test vectors: {len(test_descriptions)}")
 
-    # Initialize TabPFN with random_state for reproducibility
-    # IMPORTANT: Parameters aligned with TabICL for fair comparison:
-    # - n_estimators=32 (matches TabICL default, was 8)
-    # - average_before_softmax=True (matches TabICL's average_logits=True)
-    # - inference_precision='auto' (closest to TabICL's use_amp=True)
     tabpfn_model = TabPFNClassifier(
-        n_estimators=8,
+        n_estimators=n_estimators,
         random_state=random_state,
         average_before_softmax=True,
         inference_precision='auto'
@@ -273,7 +269,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="normal")
+    datasets = get_ucimlrepo_datasets(size="small", names=['fertility'])
 
     # Create output directory
     os.makedirs("out", exist_ok=True)

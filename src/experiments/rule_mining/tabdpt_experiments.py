@@ -209,7 +209,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="small")
+    datasets = get_ucimlrepo_datasets(size="small", names=['fertility'])
 
     # Filter out single-value columns from all datasets (uninformative, cause TabDPT to fail)
     for dataset_info in datasets:
