@@ -1,8 +1,7 @@
 """
 Seed Management Utilities for Reproducible Experiments
 
-This module provides utilities for managing random seeds across experiments
-to ensure reproducibility in machine learning research.
+This module provides utilities for managing random seeds across experiments to ensure reproducibility
 
 Key Features:
 - Generate consistent seed sequences for multiple experimental runs
@@ -97,79 +96,3 @@ def generate_seed_sequence(base_seed: int, n_runs: int) -> List[int]:
             seeds.append(new_seed)
 
     return seeds
-
-
-def get_default_seeds(n_runs: int, base_seed: int = 42) -> List[int]:
-    """
-    Get default seed sequence for experiments.
-
-    This is a convenience function that uses a standard base seed (42)
-    which is commonly used in ML research.
-
-    Args:
-        n_runs: Number of experimental runs
-        base_seed: Base seed (default: 42, the answer to everything)
-
-    Returns:
-        List of seeds for each run
-
-    Example:
-        >>> seeds = get_default_seeds(3)
-        >>> for i, seed in enumerate(seeds):
-        ...     print(f"Run {i+1}: seed={seed}")
-    """
-    return generate_seed_sequence(base_seed, n_runs)
-
-
-def create_seed_config(base_seed: int, n_runs: int) -> dict:
-    """
-    Create a seed configuration dictionary for experiments.
-
-    This is useful for saving experimental parameters including seeds.
-
-    Args:
-        base_seed: Base seed for generation
-        n_runs: Number of runs
-
-    Returns:
-        Dictionary containing seed configuration
-
-    Example:
-        >>> config = create_seed_config(42, 3)
-        >>> print(config)
-        {'base_seed': 42, 'n_runs': 3, 'seeds': [42, 12345, 67890]}
-    """
-    seeds = generate_seed_sequence(base_seed, n_runs)
-    return {
-        'base_seed': base_seed,
-        'n_runs': n_runs,
-        'seeds': seeds
-    }
-
-
-def validate_reproducibility(seed: int, n_samples: int = 1000) -> bool:
-    """
-    Validate that seed setting works correctly by generating random numbers twice.
-
-    This is a sanity check function to ensure reproducibility is working.
-
-    Args:
-        seed: Seed to test
-        n_samples: Number of random samples to generate for testing
-
-    Returns:
-        True if reproducibility works, False otherwise
-
-    Example:
-        >>> assert validate_reproducibility(42)
-    """
-    # First run
-    set_seed(seed)
-    samples1 = np.random.rand(n_samples)
-
-    # Second run with same seed
-    set_seed(seed)
-    samples2 = np.random.rand(n_samples)
-
-    # Check if identical
-    return np.allclose(samples1, samples2)

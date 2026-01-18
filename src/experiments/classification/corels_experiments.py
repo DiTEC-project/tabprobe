@@ -1,6 +1,30 @@
+#!/usr/bin/env python
 import time
 import os
 import json
+import sys
+import warnings
+from contextlib import contextmanager
+
+# Suppress all warnings before any imports
+os.environ['TQDM_DISABLE'] = '1'
+os.environ['PYTHONWARNINGS'] = 'ignore'
+warnings.filterwarnings('ignore')
+warnings.simplefilter('ignore')
+
+
+# Redirect stderr to suppress deprecation warnings from TabDPT
+@contextmanager
+def suppress_stderr():
+    """Context manager to suppress stderr output."""
+    with open(os.devnull, 'w') as devnull:
+        old_stderr = sys.stderr
+        sys.stderr = devnull
+        try:
+            yield
+        finally:
+            sys.stderr = old_stderr
+
 
 import numpy as np
 import pandas as pd
@@ -9,6 +33,13 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 from tabpfn import TabPFNClassifier
+
+# Additional warning suppression after imports
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+if hasattr(np, 'warnings'):
+    np.warnings.filterwarnings('ignore')
 
 from src.experiments.classification.corels.corels_main import (
     create_corels_freq_items_input,
@@ -281,6 +312,10 @@ def mine_itemsets_for_method(method, train_data, dataset_name, hyperparams, seed
             print(f"[CACHE HIT] Loading cached reconstruction_probs...", end=' ')
             reconstruction_probs, metadata = load_reconstruction_probs(dataset_name, method, seed, fold_idx)
 
+            # Prepare encoder from current training data
+            # The encoder is needed to convert numeric values back to original categorical values
+            _, _, _, encoder = prepare_categorical_data(train_data)
+
             # Extract itemsets using current similarity threshold
             result = extract_frequent_itemsets_from_reconstruction(
                 prob_matrix=reconstruction_probs,
@@ -289,7 +324,7 @@ def mine_itemsets_for_method(method, train_data, dataset_name, hyperparams, seed
                 data=train_data,
                 similarity=hyperparams['similarity'],
                 feature_names=metadata['feature_names'],
-                encoder=None  # Encoder not needed when using cached probs
+                encoder=encoder
             )
             itemsets = result['itemsets']
             print(f"Extracted {len(itemsets)} itemsets")
@@ -312,7 +347,7 @@ def mine_itemsets_for_method(method, train_data, dataset_name, hyperparams, seed
             if method == 'tabpfn':
                 # Initialize TabPFN model
                 tabpfn_model = TabPFNClassifier(
-                    n_estimators=8,
+                    n_estimators=hyperparams.get('n_estimators', 8),
                     random_state=hyperparams.get('random_state', 42),
                     average_before_softmax=True,
                     inference_precision='auto'
@@ -329,15 +364,19 @@ def mine_itemsets_for_method(method, train_data, dataset_name, hyperparams, seed
                     context_table=encoded_data,
                     query_matrix=test_matrix,
                     feature_value_indices=feature_value_indices,
-                    n_samples=hyperparams.get('context_samples', None)
+                    n_samples=hyperparams.get('context_samples', None),
+                    n_estimators=hyperparams.get('n_estimators', 8)
                 )
             elif method == 'tabdpt':
-                reconstruction_probs = adapt_tabdpt_for_reconstruction(
-                    context_table=encoded_data,
-                    query_matrix=test_matrix,
-                    feature_value_indices=feature_value_indices,
-                    n_samples=hyperparams.get('context_samples', None)
-                )
+                # suppress, otherwise tabdpt prints out sooo many warnings that can't suppressed otherwise
+                with suppress_stderr():
+                    reconstruction_probs = adapt_tabdpt_for_reconstruction(
+                        context_table=encoded_data,
+                        query_matrix=test_matrix,
+                        feature_value_indices=feature_value_indices,
+                        n_samples=hyperparams.get('context_samples', None),
+                        n_ensembles=hyperparams.get('n_ensembles', 8)
+                    )
 
             # Save reconstruction probabilities for future use
             save_reconstruction_probs(
@@ -600,9 +639,9 @@ if __name__ == "__main__":
     # Hyperparameters for each method
     hyperparams = {
         'aerial': {'max_length': 2, 'similarity': 0.3},
-        'tabpfn': {'max_length': 2, 'similarity': 0.3, 'context_samples': None},
-        'tabicl': {'max_length': 2, 'similarity': 0.3, 'context_samples': None},
-        'tabdpt': {'max_length': 2, 'similarity': 0.3, 'context_samples': None},
+        'tabpfn': {'max_length': 2, 'similarity': 0.3, 'context_samples': None, 'n_estimators': 8},
+        'tabicl': {'max_length': 2, 'similarity': 0.3, 'context_samples': None, 'n_estimators': 8},
+        'tabdpt': {'max_length': 2, 'similarity': 0.3, 'context_samples': None, 'n_ensembles': 8},
         'fpgrowth_0.5': {'max_length': 2, 'min_support': 0.5},
         'fpgrowth_0.3': {'max_length': 2, 'min_support': 0.3},
         'fpgrowth_0.2': {'max_length': 2, 'min_support': 0.2},
@@ -611,7 +650,8 @@ if __name__ == "__main__":
         'fpgrowth_0.01': {'max_length': 2, 'min_support': 0.01},
     }
 
-    methods = ['fpgrowth_0.05', 'fpgrowth_0.01']
+    # Methods to run (all available methods by default)
+    methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.1']
     n_runs = 10
     base_seed = 42
     n_folds = 5
@@ -619,10 +659,11 @@ if __name__ == "__main__":
     seed_sequence = generate_seed_sequence(base_seed, n_runs)
     print(f"\nSeed sequence: {seed_sequence}")
     print(f"\nHyperparameters:")
-    for method, params in hyperparams.items():
-        print(f"  {method}: {params}")
+    for method in methods:
+        print(f"  {method}: {hyperparams[method]}")
 
-    datasets = get_ucimlrepo_datasets(size="normal", names=['breast_cancer', 'congressional_voting', 'mushroom'])
+    # Load all datasets by default
+    datasets = get_ucimlrepo_datasets(size="small")
     all_datasets = datasets
 
     os.makedirs("out", exist_ok=True)

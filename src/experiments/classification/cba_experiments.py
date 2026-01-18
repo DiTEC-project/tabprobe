@@ -1,7 +1,36 @@
 import time
 import os
 import json
+import sys
 import warnings
+from contextlib import contextmanager
+
+# Suppress all warnings before any imports
+os.environ['TQDM_DISABLE'] = '1'
+os.environ['PYTHONWARNINGS'] = 'ignore'
+warnings.filterwarnings('ignore')
+warnings.simplefilter('ignore')
+
+
+# Redirect stderr to suppress deprecation warnings from TabDPT
+@contextmanager
+def suppress_stderr():
+    """Context manager to suppress stderr output at OS level."""
+    # Save the original stderr file descriptor
+    stderr_fd = sys.stderr.fileno()
+    saved_stderr_fd = os.dup(stderr_fd)
+
+    try:
+        # Redirect stderr to devnull at OS level
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull_fd, stderr_fd)
+        os.close(devnull_fd)
+        yield
+    finally:
+        # Restore stderr
+        os.dup2(saved_stderr_fd, stderr_fd)
+        os.close(saved_stderr_fd)
+
 
 import aerial
 import numpy as np
@@ -10,7 +39,14 @@ from datetime import datetime
 from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
+# Additional warning suppression after imports
 warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', message='__array_wrap__')
+warnings.filterwarnings('ignore', module='numpy')
+if hasattr(np, 'warnings'):
+    np.warnings.filterwarnings('ignore')
 
 from src.experiments.classification.cba.algorithms.m2algorithm import M2Algorithm
 from src.experiments.classification.cba.data_structures.transaction_db import TransactionDB
@@ -43,6 +79,19 @@ DATASET_CLASS_COLUMNS = {
     'acute_inflammations': 'bladder-inflammation',
     'fertility': 'diagnosis',
 }
+
+
+def filter_single_value_columns(df):
+    """
+    Filter out columns that have only 1 unique value.
+    These are uninformative and cause TabDPT to fail (requires >= 2 classes).
+    Returns the filtered dataframe and the list of dropped columns.
+    """
+    cols_to_drop = [col for col in df.columns if df[col].nunique() <= 1]
+    if cols_to_drop:
+        print(f"        Filtering out {len(cols_to_drop)} single-value columns: {cols_to_drop}")
+        return df.drop(columns=cols_to_drop), cols_to_drop
+    return df, []
 
 
 def filter_class_association_rules(rules, class_column_name):
@@ -215,13 +264,15 @@ def mine_rules_for_method(method, train_data, hyperparams):
             feature_names=feature_names
         )
     elif method == 'tabdpt':
-        rules, feature_names, original_data = tabdpt_rule_learning(
-            train_data,
-            max_antecedents=hyperparams['max_antecedents'],
-            ant_similarity=hyperparams['ant_similarity'],
-            cons_similarity=hyperparams['cons_similarity'],
-            n_ensembles=hyperparams['n_ensembles']
-        )
+        # Suppress stderr to avoid tabdpt warnings
+        with suppress_stderr():
+            rules, feature_names, original_data = tabdpt_rule_learning(
+                train_data,
+                max_antecedents=hyperparams['max_antecedents'],
+                ant_similarity=hyperparams['ant_similarity'],
+                cons_similarity=hyperparams['cons_similarity'],
+                n_ensembles=hyperparams['n_ensembles']
+            )
         rules, _ = calculate_rule_metrics(
             rules=rules,
             data=original_data,
@@ -261,6 +312,14 @@ def evaluate_cba_with_cv(dataset, method, dataset_name, hyperparams,
 
         train_df = dataset.iloc[train_idx].reset_index(drop=True)
         test_df = dataset.iloc[test_idx].reset_index(drop=True)
+
+        # For TabDPT, filter out single-value columns that cause "Number of classes must be greater than 1" error
+        # This can happen in specific folds even if the full dataset has multiple values
+        if method == 'tabdpt':
+            train_df, dropped_cols = filter_single_value_columns(train_df)
+            # Apply same filtering to test set for consistency
+            if dropped_cols:
+                test_df = test_df.drop(columns=dropped_cols, errors='ignore')
 
         # Mine rules from training data only
         fold_start_time = time.time()
@@ -386,12 +445,12 @@ if __name__ == "__main__":
     # Hyperparameters for each method
     # context_samples = None means use the entire table
     hyperparams = {
-        'aerial': {'max_antecedents': 2, 'ant_similarity': 0.1, 'cons_similarity': 0.8},
-        'tabpfn': {'max_antecedents': 2, 'ant_similarity': 0.1, 'cons_similarity': 0.8,
-                   'context_samples': None, 'n_estimators': 4},
-        'tabicl': {'max_antecedents': 2, 'ant_similarity': 0.1, 'cons_similarity': 0.8,
-                   'context_samples': None, 'n_estimators': 4},
-        'tabdpt': {'max_antecedents': 2, 'ant_similarity': 0.1, 'cons_similarity': 0.8,
+        'aerial': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8},
+        'tabpfn': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8,
+                   'context_samples': None, 'n_estimators': 8},
+        'tabicl': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8,
+                   'context_samples': None, 'n_estimators': 8},
+        'tabdpt': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8,
                    'n_ensembles': 8},
         'fpgrowth_0.5': {'max_antecedents': 2, 'min_support': 0.5, 'min_confidence': 0.8},
         'fpgrowth_0.3': {'max_antecedents': 2, 'min_support': 0.3, 'min_confidence': 0.8},
@@ -401,7 +460,8 @@ if __name__ == "__main__":
         'fpgrowth_0.01': {'max_antecedents': 2, 'min_support': 0.01, 'min_confidence': 0.8},
     }
 
-    methods = ['tabdpt']
+    # Methods to run (all available methods by default)
+    methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.1']
     n_runs = 10
     base_seed = 42
     n_folds = 5
@@ -409,11 +469,12 @@ if __name__ == "__main__":
     seed_sequence = generate_seed_sequence(base_seed, n_runs)
     print(f"\nSeed sequence: {seed_sequence}")
     print(f"\nHyperparameters:")
-    for method, params in hyperparams.items():
-        print(f"  {method}: {params}")
+    for method in methods:
+        print(f"  {method}: {hyperparams[method]}")
 
-    dataset_size = "normal"
-    datasets = get_ucimlrepo_datasets(size=dataset_size, names=["mushroom"])
+    # Load all datasets by default
+    dataset_size = "small"
+    datasets = get_ucimlrepo_datasets(size=dataset_size)
     all_datasets = datasets
 
     os.makedirs("out", exist_ok=True)

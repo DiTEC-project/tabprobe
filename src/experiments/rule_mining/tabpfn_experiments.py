@@ -267,9 +267,9 @@ if __name__ == "__main__":
     seed_sequence = generate_seed_sequence(base_seed, n_runs)
     print(f"Seeds for {n_runs} runs: {seed_sequence}")
 
-    # Load datasets
+    # Load datasets (runs on all datasets by default)
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="small", names=['fertility'])
+    datasets = get_ucimlrepo_datasets(size="small")
 
     # Create output directory
     os.makedirs("out", exist_ok=True)

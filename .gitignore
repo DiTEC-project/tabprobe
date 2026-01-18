@@ -1,6 +1,35 @@
+# IDE and editor
 .claude
-venv
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+venv/
 __pycache__/
 *.pyc
 *.pyo
-.idea/
+*.egg-info/
+.eggs/
+
+# Experiment outputs (regenerate by running experiments)
+out/
+visualizations/
+exec_logs/
+*.log
+*.err
+
+# SLURM outputs
+slurm_*.out
+slurm_*.err
+setup_output_*.log
+setup_error_*.err
+
+# Caches
+.pytest_cache/
+.cache/
+*.npz
+
+# Jupyter
+.ipynb_checkpoints/

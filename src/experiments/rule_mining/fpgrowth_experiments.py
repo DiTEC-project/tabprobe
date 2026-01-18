@@ -273,7 +273,7 @@ if __name__ == "__main__":
 
     # Load datasets
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="normal")
+    datasets = get_ucimlrepo_datasets(size="small")
 
     # Create output directory
     os.makedirs("out", exist_ok=True)

@@ -6,5 +6,5 @@ This package contains experiments for mining frequent itemsets using various met
 - tabpfn: TabPFN foundation model adaptation
 - tabicl: TabICL foundation model adaptation
 - tabdpt: TabDPT foundation model adaptation
-- fpgrowth: Classical FP-Growth algorithm (calibrated)
+- fpgrowth: Classical FP-Growth algorithm
 """

@@ -1,6 +1,7 @@
 einops==0.8.1
 huggingface-hub==0.36.0
 joblib==1.4.2
+mlxtend==0.23.3
 networkx==3.5
 numpy==2.0.2
 openpyxl==3.1.5
@@ -17,5 +18,4 @@ torch==2.7.1
 tqdm==4.67.1
 transformers==4.57.1
 ucimlrepo==0.0.7
-wandb==0.23.0
 xgboost==3.1.1

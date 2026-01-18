@@ -80,6 +80,14 @@ def adapt_tabdpt_for_reconstruction(context_table, query_matrix,
         y_context_onehot = context_table[:, start_idx:end_idx]
         y_context = np.argmax(y_context_onehot, axis=1)
 
+        # Skip features with only one unique class (constant features)
+        unique_classes = np.unique(y_context)
+        if len(unique_classes) < 2:
+            print(f"        Skipping feature {feat_idx}: only {len(unique_classes)} unique class(es)")
+            # Set uniform probabilities for constant features
+            reconstruction_probs[:, start_idx:end_idx] = 1.0 / n_classes
+            continue
+
         tabdpt_model = TabDPTClassifier()
         tabdpt_model.fit(x_context, y_context)
 
@@ -207,9 +215,9 @@ if __name__ == "__main__":
     seed_sequence = generate_seed_sequence(base_seed, n_runs)
     print(f"Seeds for {n_runs} runs: {seed_sequence}")
 
-    # Load datasets
+    # Load datasets (runs on all datasets by default)
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="small", names=['fertility'])
+    datasets = get_ucimlrepo_datasets(size="small")
 
     # Filter out single-value columns from all datasets (uninformative, cause TabDPT to fail)
     for dataset_info in datasets:

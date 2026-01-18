@@ -1,11 +1,14 @@
 """
 Scalability Experiment: Execution Time and Peak Memory vs. Number of Columns
 
-This experiment evaluates how Aerial, TabICL, TabPFN, and TabDPT scale with increasing
-feature count (measured as one-hot encoded columns) in terms of:
+This experiment evaluates how Aerial, TabICL, TabPFN, TabDPT, and FP-Growth scale with
+increasing feature count (measured as one-hot encoded columns) in terms of:
 - Execution time (seconds)
 - Peak CPU memory consumption (MB)
 - Peak GPU memory consumption (MB)
+
+FP-Growth is tested with multiple min_support values (0.5, 0.2, 0.1, 0.05, 0.01)
+while keeping antecedent length at 2 and min_confidence at 0.8.
 
 Methodology:
 1. Load a dataset and one-hot encode it
@@ -13,11 +16,11 @@ Methodology:
 3. For each column count:
    - Run each method multiple times with different seeds
    - Measure execution time and peak memory
-4. Save all results to {timestamp}_scalability.csv
+4. Save all results to {timestamp}_scalability.xlsx
 
 For reproducibility:
 - Fixed base seed (42)
-- Multiple runs per configuration (n=5)
+- Multiple runs per configuration (n=10)
 - All parameters logged
 - Feature selection is deterministic (first N features)
 """
@@ -34,6 +37,7 @@ from src.experiments.rule_mining.aerial_experiments import aerial_rule_learning
 from src.experiments.rule_mining.tabicl_experiments import tabicl_rule_learning
 from src.experiments.rule_mining.tabpfn_experiments import tabpfn_rule_learning
 from src.experiments.rule_mining.tabdpt_experiments import tabdpt_rule_learning, filter_single_value_columns
+from src.experiments.rule_mining.fpgrowth_experiments import fpgrowth_rule_learning
 
 from src.utils import get_ucimlrepo_datasets, set_seed, generate_seed_sequence
 from src.utils.data_prep import prepare_categorical_data
@@ -200,6 +204,37 @@ if __name__ == "__main__":
         'n_ensembles': 8,
     }
 
+    # FP-Growth parameters with different min_support values
+    fpgrowth_params_0_5 = {
+        'max_len': 2,
+        'min_confidence': 0.8,
+        'min_support': 0.5,
+    }
+
+    fpgrowth_params_0_2 = {
+        'max_len': 2,
+        'min_confidence': 0.8,
+        'min_support': 0.2,
+    }
+
+    fpgrowth_params_0_1 = {
+        'max_len': 2,
+        'min_confidence': 0.8,
+        'min_support': 0.1,
+    }
+
+    fpgrowth_params_0_05 = {
+        'max_len': 2,
+        'min_confidence': 0.8,
+        'min_support': 0.05,
+    }
+
+    fpgrowth_params_0_01 = {
+        'max_len': 2,
+        'min_confidence': 0.8,
+        'min_support': 0.01,
+    }
+
     # ========== Load and Prepare Dataset ==========
 
     print(f"\nLoading dataset: {dataset_name_to_use}")
@@ -231,12 +266,17 @@ if __name__ == "__main__":
     seed_sequence = generate_seed_sequence(base_seed, n_runs_per_config)
     print(f"\nSeed sequence for {n_runs_per_config} runs: {seed_sequence}")
 
-    # Methods to test
+    # Methods to test (all methods by default)
     methods = {
         'aerial': (aerial_rule_learning, aerial_params),
         'tabicl': (tabicl_rule_learning, tabicl_params),
         'tabpfn': (tabpfn_rule_learning, tabpfn_params),
         'tabdpt': (tabdpt_rule_learning, tabdpt_params),
+        'fpgrowth_0.5': (fpgrowth_rule_learning, fpgrowth_params_0_5),
+        'fpgrowth_0.2': (fpgrowth_rule_learning, fpgrowth_params_0_2),
+        'fpgrowth_0.1': (fpgrowth_rule_learning, fpgrowth_params_0_1),
+        'fpgrowth_0.05': (fpgrowth_rule_learning, fpgrowth_params_0_05),
+        'fpgrowth_0.01': (fpgrowth_rule_learning, fpgrowth_params_0_01),
     }
 
     # Test each target column count
@@ -270,8 +310,11 @@ if __name__ == "__main__":
                 # Set seed for reproducibility
                 set_seed(run_seed)
 
-                # Add random_state to parameters
-                params_with_seed = {**method_params, 'random_state': run_seed}
+                # Add random_state to parameters (except for FP-Growth which is deterministic)
+                if 'fpgrowth' in method_name:
+                    params_with_seed = method_params
+                else:
+                    params_with_seed = {**method_params, 'random_state': run_seed}
 
                 # Measure execution time and memory
                 metrics = measure_time_and_memory(
@@ -378,6 +421,11 @@ if __name__ == "__main__":
             'tabicl_params': str(tabicl_params),
             'tabpfn_params': str(tabpfn_params),
             'tabdpt_params': str(tabdpt_params),
+            'fpgrowth_params_0.5': str(fpgrowth_params_0_5),
+            'fpgrowth_params_0.2': str(fpgrowth_params_0_2),
+            'fpgrowth_params_0.1': str(fpgrowth_params_0_1),
+            'fpgrowth_params_0.05': str(fpgrowth_params_0_05),
+            'fpgrowth_params_0.01': str(fpgrowth_params_0_01),
         }])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
 

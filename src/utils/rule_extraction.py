@@ -144,17 +144,13 @@ def calculate_itemset_support(itemset, data, feature_names):
         column_values = data[feature].values
 
         # Compare with the target value
-        # Handle both string and numeric comparisons
-        if isinstance(value, (str, np.str_)):
-            matches = column_values.astype(str) == str(value)
-        elif isinstance(value, (int, np.integer)):
-            # For integer values, ensure comparison works
-            matches = column_values.astype(int) == int(value)
-        elif isinstance(value, (float, np.floating)):
-            matches = column_values.astype(float) == float(value)
-        else:
-            # Default comparison
-            matches = column_values == value
+        # Convert numpy scalar types to Python native types for consistent comparison
+        if hasattr(value, 'item'):
+            # numpy scalar - convert to Python native type
+            value = value.item()
+
+        # Direct comparison (works for strings, numbers, etc.)
+        matches = column_values == value
 
         matching_rows &= matches
 

@@ -23,7 +23,7 @@ from src.utils import (
 )
 
 
-def adapt_tabicl_for_reconstruction(context_table, query_matrix, feature_value_indices, n_samples=None, noise_factor=0.5):
+def adapt_tabicl_for_reconstruction(context_table, query_matrix, feature_value_indices, n_samples=None, noise_factor=0.5, n_estimators=8):
     """Adapt TabICL for itemset mining using reconstruction logic."""
     if n_samples and len(context_table) > n_samples:
         context_table = context_table[:n_samples]
@@ -47,7 +47,7 @@ def adapt_tabicl_for_reconstruction(context_table, query_matrix, feature_value_i
         x_context = np.delete(noisy_context, range(start_idx, end_idx), axis=1)
         y_context = np.argmax(context_table[:, start_idx:end_idx], axis=1)
 
-        tabicl_model = TabICLClassifier()
+        tabicl_model = TabICLClassifier(n_estimators=n_estimators)
         tabicl_model.fit(x_context, y_context)
 
         x_query = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
