@@ -9,7 +9,7 @@ import torch
 from src.utils.data_prep import prepare_categorical_data, add_gaussian_noise
 from src.utils.test_matrix import generate_test_matrix
 from src.utils.rule_extraction import extract_rules_from_reconstruction
-from src.utils.rule_quality import calculate_rule_quality
+from src.utils.rule_quality import calculate_rule_metrics
 
 
 class RuleMiner:
@@ -267,18 +267,12 @@ class RuleMiner:
 
     def _calculate_metrics(self, rules: list, data: pd.DataFrame) -> list:
         """Calculate quality metrics for each rule."""
-        rules_with_metrics = []
-
-        for rule in rules:
-            metrics = calculate_rule_quality(
-                rule['antecedents'],
-                rule['consequent'],
-                data,
-                self.feature_names_
-            )
-            rule.update(metrics)
-            rules_with_metrics.append(rule)
-
+        data_array = data.values
+        rules_with_metrics, _ = calculate_rule_metrics(
+            rules=rules,
+            data=data_array,
+            feature_names=self.feature_names_
+        )
         return rules_with_metrics
 
     def get_rules(self) -> list:
