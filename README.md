@@ -83,7 +83,7 @@ models ([TabPFNv2.5](https://github.com/PriorLabs/TabPFN) [1], [TabICL](https://
 and [TabDPT](https://github.com/layer6ai-labs/TabDPT-inference) [3]),
 Aerial+ [9] and FP-Growth [5] are used in the experiments. Please follow the hyperlinks to access detailed instructions
 on installations of individual tabular foundation models. Aerial+ is implemented
-with [PyAerial](https://github.com/DiTEC-project/pyaerial) [10] and FP-Growth
+with PyAerial [10] and FP-Growth
 is implemented with [Mlxtend](https://rasbt.github.io/mlxtend/user_guide/frequent_patterns/fpgrowth/) [11].
 
 In downstream classification experiments, CORELS [8] is implemented following its original
@@ -166,8 +166,8 @@ dataset and seed are saved into `out/classifiers`.
 
 ## Learn Rules on Your Own Data
 
-Beyond reproducing the experiments, we also provide a `rulemining` wrapper for TabPFN, TabICL and TabDPT that can be
-run on any given dataset in `pandas.Dataframe` form.
+Beyond reproducing the experiments, this repository also provides a `wrapper/tabprobe` wrapper for TabPFN, TabICL and
+TabDPT that can be run on any given dataset in `pandas.Dataframe` form.
 
 To be able to run the example code below, install `ucimlrepo` repository which the code uses to fetch a sample dataset.
 
