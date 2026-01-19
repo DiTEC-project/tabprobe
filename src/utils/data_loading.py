@@ -1,9 +1,5 @@
 """
 Dataset loading utilities for the rulepfn project.
-
-Provides functions to load datasets from:
-- data/ucimlrepo: UCI ML Repository datasets
-- data/gene_expression: Gene expression datasets
 """
 
 from pathlib import Path
@@ -26,9 +22,7 @@ UCIMLREPO_NORMAL_DATASETS = [
 ]
 
 UCIMLREPO_SMALL_DATASETS = [
-    # 'lung_cancer',
     'hepatitis',
-    # 'breast_cancer_coimbra',
     'cervical_cancer_behavior_risk',
     'autism_screening_adolescent',
     'acute_inflammations',
@@ -39,7 +33,6 @@ UCIMLREPO_SMALL_DATASETS = [
 DATASETS_TO_DISCRETIZE = {
     'spambase',
     'hepatitis',
-    # 'breast_cancer_coimbra',
     'cervical_cancer_behavior_risk',
     'autism_screening_adolescent',
     'acute_inflammations',

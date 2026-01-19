@@ -8,18 +8,6 @@ Key Features:
 - Set seeds for all major random number generators (Python, NumPy, PyTorch)
 - Save and load seed configurations
 - Create deterministic experimental setups
-
-Usage:
-    from src.utils.seed_utils import set_seed, generate_seed_sequence
-
-    # For a single experiment
-    set_seed(42)
-
-    # For multiple runs
-    seeds = generate_seed_sequence(base_seed=42, n_runs=10)
-    for run_idx, seed in enumerate(seeds):
-        set_seed(seed)
-        # Run experiment...
 """
 
 import random

@@ -3,12 +3,7 @@ FP-Growth Rule Mining Experiments
 
 This module runs association rule mining experiments using FP-Growth algorithm.
 
-FP-Growth (Frequent Pattern Growth) is a classic frequent itemset mining algorithm
-that discovers association rules from transactional data. This implementation uses
-the mlxtend library (CPU-based).
-
-IMPORTANT: FP-Growth is deterministic and does not use random seeds. It runs once
-per dataset using calibrated min_support thresholds from Aerial.
+FP-Growth is deterministic and does not use random seeds. It runs once per dataset.
 """
 import time
 import os
@@ -23,8 +18,7 @@ from mlxtend.preprocessing import TransactionEncoder
 
 from src.utils import (
     get_ucimlrepo_datasets,
-    save_rules,
-    load_fpgrowth_calibration,
+    save_rules
 )
 
 
@@ -290,19 +284,6 @@ if __name__ == "__main__":
         print(f"Dataset: {dataset_name}")
         print("=" * 80)
         print(f"Shape: {dataset.shape}")
-
-        # Load calibrated threshold from Aerial
-        print(f"\nLoading calibrated threshold from {reference_method}...")
-        # try:
-        #     min_support = load_fpgrowth_calibration(
-        #         dataset_name=dataset_name,
-        #         reference_method=reference_method
-        #     )
-        #     print(f"Calibrated min_support: {min_support:.4f}")
-        # except ValueError as e:
-        #     print(f"ERROR: {e}")
-        #     print(f"Skipping {dataset_name}. Run {reference_method} experiments first.")
-        #     continue
 
         # Track CPU memory
         process = psutil.Process()

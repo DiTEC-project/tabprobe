@@ -60,9 +60,9 @@ class TabProbe:
     TabProbe: Unified interface for association rule mining using tabular foundation models.
 
     Supported methods:
-        - 'tabpfn': TabPFN
-        - 'tabicl': TabICL
-        - 'tabdpt': TabDPT
+        - 'tabpfn'
+        - 'tabicl'
+        - 'tabdpt'
 
     Available metrics:
         - 'support': Rule support (frequency of antecedent + consequent)

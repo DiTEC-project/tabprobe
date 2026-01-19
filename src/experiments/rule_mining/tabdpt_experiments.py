@@ -1,8 +1,7 @@
 """
 TabDPT-based Rule Extraction
 
-Adapts TabDPT for association rule mining using Aerial-style reconstruction logic.
-For each feature, fits TabDPT to predict that feature from all others.
+Adapts TabDPT for association rule mining using TabProbe
 """
 import os
 

@@ -1,8 +1,7 @@
 """
-Rule Saving and FP-Growth Calibration Utilities
+Save association rules into json files
 
-Common utilities for saving rules across all rule mining methods and
-calculating FP-Growth calibration thresholds.
+Common utilities for saving rules across all rule mining methods
 """
 import os
 import json

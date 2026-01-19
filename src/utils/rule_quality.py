@@ -2,7 +2,7 @@
 Rule Quality Metrics Module
 
 This module provides efficient computation of rule quality metrics for
-association rules. Designed to work with PyAerial's rule output structure.
+association rules.
 
 Supported Metrics:
 - Support: Frequency of the complete rule (antecedent + consequent) in the dataset

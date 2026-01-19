@@ -1,8 +1,5 @@
 """
-TabICL-based Rule Extraction Baseline
-
-This is a BASELINE implementation/adaptation of the tabular foundation model TabICL to do association
-rule mining from tabular data
+TabICL-based Rule Extraction using TabProbe
 """
 import time
 import os
@@ -29,9 +26,7 @@ from src.utils import (
 def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
                                     feature_value_indices, n_samples=None, noise_factor=0.5):
     """
-    Adapt TabICL for unsupervised rule learning
-    - Train one model per feature to reconstruct that feature from all other features
-    - For each query, predict ALL features to simulate "all-at-once" reconstruction
+    Adapt TabICL for unsupervised rule learning using TabProbe
 
     Args:
         tabicl_model: Pretrained TabICL model
@@ -66,7 +61,6 @@ def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
     reconstruction_probs = np.zeros((n_queries, n_features_total))
 
     # For each feature, train TabICL to predict it and reconstruct for ALL queries
-    # This simulates Aerial's all-at-once reconstruction behavior
     print(f"    Reconstructing all features for {n_queries} queries...")
     print(f"    Training {len(feature_value_indices)} feature predictors...")
 

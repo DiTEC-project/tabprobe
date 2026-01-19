@@ -1,37 +1,7 @@
 """
-TabPFN-based Rule Extraction Baseline
-
-This is a BASELINE implementation/adaptation of the tabular foundation model TabPFN to do association
-rule mining from tabular data using a Aerial-like logic (association by reconstruction/prediction success)
-
-Adaptation Strategy:
-- For each feature: Train TabPFN to predict that feature from all others
-- Add Gaussian noise to context (matching PyAerial's denoising approach)
-- Apply to test vectors (antecedent patterns) to get reconstructions
-- Extract rules using Aerial's rule extraction logic
-
-Limitations of this approach:
-1. TabPFN is supervised (needs discrete labels), while rule learning is unsupervised
-2. We must predict each feature independently, losing holistic pattern reconstruction
-3. Much slower than Aerial (must retrain/fit for each feature)
-4. Quality expected to be inferior to specialized rule learning models
-5. CRITICAL: Antecedent validation is fundamentally broken (see below)
-
-FUNDAMENTAL INCOMPATIBILITY:
-PyAerial: "Given marked features A, reconstruct ALL features"
-          - Antecedents A are in the query
-          - Can validate A reconstructs well
-
-TabPFN:   "Given all features EXCEPT i, predict feature i"
-          - When i ∈ A (i is antecedent), we MUST remove it
-          - Cannot validate antecedent reconstruction!
-
-Result: Consequent prediction works (✓), antecedent validation fails (✗)
-        Rules A -> C can be extracted, but lower quality (no antecedent filtering)
-
-This baseline serves to justify the need for custom tabular foundation models
-specifically designed for unsupervised rule discovery.
+TabPFN-based Rule Extraction using TabProbe
 """
+
 import time
 import os
 import numpy as np
@@ -58,24 +28,7 @@ from src.utils import (
 def adapt_tabpfn_for_reconstruction(tabpfn_model, context_table, query_matrix,
                                     feature_value_indices, n_samples=None, noise_factor=0.5):
     """
-    Adapt TabPFN for unsupervised rule learning following Aerial's ALL-AT-ONCE reconstruction logic.
-
-    Aerial's Approach:
-    - For a query with marked features A, pass it through the autoencoder ONCE
-    - Get reconstruction probabilities for ALL features (both A and F/A) simultaneously
-    - Check if A reconstructs well (antecedent validation)
-    - Check which features in F/A reconstruct well (consequent extraction)
-
-    PyAerial marks features A and looks at reconstruction of F/A. If reconstruction is successful
-    based on both antecedent and consequent similarity thresholds for features C, then A -> C.
-
-    Problem: TabPFN is supervised (needs y) and predicts ONE label at a time,
-    while Aerial reconstructs ALL features at once.
-
-    Solution:
-    - Train one model per feature to reconstruct that feature from all other features
-    - For each query, predict ALL features to simulate "all-at-once" reconstruction
-    - This mimics Aerial's behavior: given marked features A, what are probabilities for all features?
+    Adapt TabPFN for unsupervised rule learning using TabProbe
 
     Args:
         tabpfn_model: Pretrained TabPFN model

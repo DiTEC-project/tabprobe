@@ -1,5 +1,5 @@
 """
-Test matrix generation utilities.
+Test (probing) matrix generation utilities.
 
 This module contains functions for generating test matrices used in rule extraction.
 """
@@ -12,7 +12,6 @@ def generate_test_matrix(n_features, classes_per_feature, max_antecedents=2,
                          use_zeros_for_unmarked=False):
     """
     Generate test matrix (query) - creates ALL antecedent combinations at once.
-    Unlike PyAerial which generates incrementally, we create all combinations upfront.
 
     Args:
         n_features: Number of features (columns) in the data
@@ -45,7 +44,7 @@ def generate_test_matrix(n_features, classes_per_feature, max_antecedents=2,
 
     # Initialize unmarked features with equal probabilities or zeros
     unmarked_features = _initialize_input_vectors(total_dim, feature_value_indices,
-                                                   use_zeros=use_zeros_for_unmarked)
+                                                  use_zeros=use_zeros_for_unmarked)
 
     test_vectors = []
     test_descriptions = []

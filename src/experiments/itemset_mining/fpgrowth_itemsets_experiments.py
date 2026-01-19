@@ -1,8 +1,5 @@
 """
 FP-Growth Frequent Itemset Mining Experiments
-
-Classical frequent itemset mining with calibrated min_support from Aerial.
-FP-Growth is deterministic and runs once per dataset.
 """
 import time
 import os
@@ -12,12 +9,6 @@ from datetime import datetime
 
 from mlxtend.frequent_patterns import fpgrowth
 from mlxtend.preprocessing import TransactionEncoder
-
-from src.utils import (
-    get_ucimlrepo_datasets,
-    save_itemsets,
-    load_fpgrowth_itemset_calibration,
-)
 
 
 def fpgrowth_itemset_learning(dataset, min_support=0.05, max_len=3):
@@ -87,117 +78,3 @@ def fpgrowth_itemset_learning(dataset, min_support=0.05, max_len=3):
     }
 
     return itemsets, stats
-
-
-# Main execution
-if __name__ == "__main__":
-    print("=" * 80)
-    print("FP-Growth Frequent Itemset Mining Experiments")
-    print("=" * 80)
-
-    # FP-Growth is deterministic - no seeds
-    max_len = 3
-
-    # Load datasets
-    print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="small")  # Match Aerial's dataset size
-
-    # Create output directory
-    os.makedirs("out/frequent_itemsets", exist_ok=True)
-
-    # Results storage
-    all_results = []
-
-    # Run experiments for each dataset
-    for dataset_info in datasets:
-        dataset_name = dataset_info['name']
-        dataset = dataset_info['data']
-
-        print("\n" + "=" * 80)
-        print(f"Dataset: {dataset_name}")
-        print("=" * 80)
-        print(f"Shape: {dataset.shape}")
-
-        # Load calibration threshold
-        try:
-            calibration = load_fpgrowth_itemset_calibration(
-                dataset_name=dataset_name,
-                reference_method="aerial"
-            )
-            min_support = calibration['min_support']
-            print(f"Using calibrated min_support={min_support:.4f} (covers 90% of Aerial itemsets)")
-        except FileNotFoundError:
-            # Fallback to default if calibration not available
-            min_support = 0.05
-            print(f"WARNING: Calibration not found, using default min_support={min_support}")
-
-        # Track time
-        start_time = time.time()
-
-        # Extract itemsets
-        extracted_itemsets, stats = fpgrowth_itemset_learning(
-            dataset=dataset,
-            min_support=min_support,
-            max_len=max_len
-        )
-
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-
-        print(f"\nCompleted in {elapsed_time:.2f} seconds")
-        print(f"Extracted {len(extracted_itemsets)} frequent itemsets")
-
-        # Save itemsets (no seed for deterministic method)
-        if len(extracted_itemsets) > 0:
-            itemsets_file = save_itemsets(
-                itemsets=extracted_itemsets,
-                stats=stats,
-                dataset_name=dataset_name,
-                method_name="fpgrowth",
-                seed=None  # Deterministic, no seed
-            )
-            print(f"Itemsets saved to {itemsets_file}")
-
-            print(f"  Itemset count: {stats['itemset_count']}")
-            print(f"  Average support: {stats['average_support']:.4f}")
-
-            result = {
-                'dataset': dataset_name,
-                'num_itemsets': stats['itemset_count'],
-                'avg_support': stats['average_support'],
-                'min_support_threshold': min_support,
-                'execution_time': elapsed_time
-            }
-        else:
-            print("  WARNING: No itemsets extracted!")
-            result = {
-                'dataset': dataset_name,
-                'num_itemsets': 0,
-                'avg_support': 0.0,
-                'min_support_threshold': min_support,
-                'execution_time': elapsed_time
-            }
-
-        all_results.append(result)
-
-    # Save results to Excel
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_filename = f"out/fpgrowth_itemsets_{timestamp}.xlsx"
-
-    with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
-        # Sheet 1: Results (one row per dataset)
-        results_df = pd.DataFrame(all_results)
-        results_df.to_excel(writer, sheet_name='Results', index=False)
-
-        # Sheet 2: Parameters
-        params_df = pd.DataFrame([{
-            'max_len': max_len,
-            'calibration_method': 'aerial',
-            'calibration_coverage': 0.9,
-            'deterministic': True
-        }])
-        params_df.to_excel(writer, sheet_name='Parameters', index=False)
-
-    print("\n" + "=" * 80)
-    print(f"Results saved to {output_filename}")
-    print("=" * 80)

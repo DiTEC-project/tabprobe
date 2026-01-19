@@ -2,10 +2,6 @@
 PyAerial Rule Learning Experiments
 
 This module runs association rule mining experiments using PyAerial.
-
-PyAerial learns to reconstruct categorical data through a neural autoencoder,
-then extracts rules by testing which feature combinations lead to successful
-reconstruction of other features.
 """
 import time
 import os
@@ -20,8 +16,7 @@ from src.utils import (
     get_ucimlrepo_datasets,
     set_seed,
     generate_seed_sequence,
-    save_rules,
-    calculate_and_save_all_calibrations,
+    save_rules
 )
 
 
@@ -388,13 +383,3 @@ if __name__ == "__main__":
     print("Calculating FP-Growth Calibration Thresholds")
     print("=" * 80)
     print("Finding minimum support thresholds for FP-Growth to cover 90% of Aerial rules...")
-
-    dataset_names = [d['name'] for d in datasets]
-    thresholds = calculate_and_save_all_calibrations(
-        datasets=dataset_names,
-        reference_method="aerial",
-        coverage_percentage=0.8
-    )
-
-    print("\nFP-Growth calibration thresholds saved.")
-    print("=" * 80)

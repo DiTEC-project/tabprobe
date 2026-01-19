@@ -184,8 +184,9 @@ miner = TabProbe(method='tabicl', ant_similarity=0.5, cons_similarity=0.8)
 rules = miner.mine_rules(dataset, metrics=["support", "confidence"])
 
 # print rule quality statistics
-print(print(miner.get_statistics()))
+print("Average rule quality statistics:\n", print(miner.get_statistics()))
 
+print("3 sample association rules:")
 # Print top 3 rules
 for rule in rules[:3]:
     ant = ' & '.join([f"{a['feature']}={a['value']}" for a in rule['antecedents']])
@@ -194,8 +195,27 @@ for rule in rules[:3]:
 
 # Convert to DataFrame for analysis
 rules_df = miner.to_dataframe()
-print(rules_df.head())
+print("Rules in dataframe form for further processing:\n", rules_df.head())
+```
 
+Output of the code above is as follows:
+
+```
+Average rule quality statistics: 
+{'num_rules': 18, 'support': 0.47513597513597516, 'confidence': 0.8988067608986312, 'data_coverage': 0.9020979020979021}
+
+3 sample association rules:
+inv-nodes=0-2 -> node-caps=no (conf: 0.944)
+inv-nodes=0-2 -> irradiat=no (conf: 0.859)
+node-caps=no -> inv-nodes=0-2 (conf: 0.905)
+
+Rules in dataframe form for further processing:
+     antecedents     consequent   support  confidence
+0  inv-nodes=0-2   node-caps=no  0.702797    0.943662
+1  inv-nodes=0-2    irradiat=no  0.639860    0.859155
+2   node-caps=no  inv-nodes=0-2  0.702797    0.905405
+3    irradiat=no  inv-nodes=0-2  0.639860    0.839450
+4    irradiat=no   node-caps=no  0.657343    0.862385
 ```
 
 Numerical values needs to discretized before rule learning.

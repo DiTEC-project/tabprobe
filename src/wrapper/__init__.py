@@ -6,18 +6,18 @@ tabular foundation models (TabPFN, TabICL, TabDPT).
 
 Example usage:
     from ucimlrepo import fetch_ucirepo
-    from src.rulemining import RuleMiner
+    from src.wrapper import TabProbe
 
     # Load data
-    dataset = fetch_ucirepo(id=17)  # breast_cancer
+    dataset = fetch_ucirepo(id=14)  # breast_cancer
     df = dataset.data.features
 
     # Mine rules with TabPFN
-    miner = RuleMiner(method='tabpfn')
+    miner = TabProbe(method='tabpfn')
     rules = miner.fit(df)
 """
 
-from .rule_miner import RuleMiner
+from src.wrapper.tabprobe import TabProbe
 
-__all__ = ['RuleMiner']
+__all__ = ['TabProbe']
 __version__ = '0.1.0'
