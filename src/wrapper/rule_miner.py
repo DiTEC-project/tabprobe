@@ -38,17 +38,13 @@ def discretize_numerical(
             continue
 
         n_unique = result[col].nunique()
-        if n_unique <= categorical_threshold:
+        if n_unique < categorical_threshold:
             result[col] = result[col].astype(str)
             continue
 
         try:
-            result[col] = pd.qcut(
-                result[col],
-                q=n_bins,
-                labels=[f"Q{i+1}" for i in range(n_bins)],
-                duplicates='drop'
-            )
+            binned = pd.qcut(result[col], q=n_bins, duplicates='drop')
+            result[col] = binned.apply(lambda x: f"[{x.left:.2f},{x.right:.2f})" if pd.notna(x) else str(x))
             discretized_cols.append(col)
         except ValueError:
             result[col] = result[col].astype(str)
@@ -133,6 +129,7 @@ class RuleMiner:
         self.noise_factor = noise_factor
         self.n_bins = n_bins
         self.random_state = random_state
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         self.rules_: Optional[List[Dict]] = None
         self.statistics_: Optional[Dict[str, float]] = None
@@ -159,7 +156,7 @@ class RuleMiner:
 
         Returns:
             List of rules. Each rule is a dictionary with:
-                - 'antecedents': List of conditions, e.g., [{'feature': 'age', 'value': 'Q3'}, ...]
+                - 'antecedents': List of conditions, e.g., [{'feature': 'age', 'value': '[25.00,35.00)'}, ...]
                 - 'consequent': Single condition, e.g., {'feature': 'class', 'value': 'positive'}
                 - Requested metrics (support, confidence, etc.)
         """
@@ -237,7 +234,11 @@ class RuleMiner:
                 reconstruction_probs[:, start_idx:end_idx] = 1.0 / n_classes
                 continue
 
-            model = TabPFNClassifier(n_estimators=self.n_estimators, random_state=self.random_state)
+            model = TabPFNClassifier(
+                n_estimators=self.n_estimators,
+                random_state=self.random_state,
+                device=self.device
+            )
             model.fit(x_context, y_context)
 
             x_query = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
@@ -265,7 +266,11 @@ class RuleMiner:
                 reconstruction_probs[:, start_idx:end_idx] = 1.0 / n_classes
                 continue
 
-            model = TabICLClassifier(random_state=self.random_state, n_estimators=self.n_estimators)
+            model = TabICLClassifier(
+                random_state=self.random_state,
+                n_estimators=self.n_estimators,
+                device=self.device
+            )
             model.fit(x_context, y_context)
 
             x_query = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
