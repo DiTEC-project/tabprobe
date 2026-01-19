@@ -42,12 +42,17 @@ and baselines used in the experiments.
 │   │   │   └── corels_experiments.py
 │   │   ├── scalability_experiments.py  # Scalability experiments
 │   │   └── hyperparameter_analysis.py  # Hyper-parameter analysis experiment
-│   └── utils/                   # Shared utilities
-│       ├── data_loading.py      # UCI ML repo data loading
-│       ├── data_prep.py         # Data encoding
-│       ├── rule_extraction.py   # Rule extraction from reconstructions
-│       └── rule_quality.py      # Quality metrics
-├── requirements.txt             # Project requirements
+│   └── utils/                          # Shared utilities
+│       ├── data_loading.py             # UCI ML repo data loading
+│       ├── data_prep.py                # Data encoding
+│       ├── discretization.py           # Discretization of numerical values
+│       ├── reconstruction_cache.py     # Cache TFM reconstructions for further probing
+│       ├── rule_extraction.py          # Rule extraction from reconstructions
+│       ├── rule_quality.py             # Rule quality metrics
+│       ├── rule_saving.py              # Store learned rules into files
+│       ├── seed_utils.py               # Random seed utilities for reproducibility
+│       └── rule_quality.py             # Quality metrics
+├── requirements.txt                    # Project requirements
 ```
 
 ### Datasets
