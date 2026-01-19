@@ -68,25 +68,29 @@ class RuleMiner:
         - 'tabicl': TabICL
         - 'tabdpt': TabDPT
 
+    Available metrics:
+        - 'support': Rule support (frequency of antecedent + consequent)
+        - 'confidence': P(consequent | antecedent)
+        - 'rule_coverage': Antecedent support (frequency of antecedent alone)
+        - 'zhangs_metric': Zhang's correlation metric
+        - 'interestingness': Interestingness score
+
     Example:
         >>> from ucimlrepo import fetch_ucirepo
         >>> from src.wrapper import RuleMiner
         >>>
-        >>> dataset = fetch_ucirepo(id=244)  # fertility
+        >>> dataset = fetch_ucirepo(id=17)  # breast_cancer
         >>> df = dataset.data.features
         >>>
         >>> miner = RuleMiner(method='tabicl', n_estimators=2, max_antecedents=2)
-        >>> rules = miner.mine_rules(df)
+        >>> rules = miner.mine_rules(df, metrics=['support', 'confidence'])
         >>>
-        >>> for rule in rules[:5]:
-        ...     ant = ' & '.join([f"{a['feature']}={a['value']}" for a in rule['antecedents']])
-        ...     cons = f"{rule['consequent']['feature']}={rule['consequent']['value']}"
-        ...     print(f"{ant} -> {cons} (conf: {rule['confidence']:.3f})")
-        >>>
+        >>> print(miner.get_statistics())
         >>> rules_df = miner.to_dataframe()
     """
 
     SUPPORTED_METHODS = ['tabpfn', 'tabicl', 'tabdpt']
+    AVAILABLE_METRICS = ['support', 'confidence', 'rule_coverage', 'zhangs_metric', 'interestingness']
 
     def __init__(
         self,
@@ -131,12 +135,17 @@ class RuleMiner:
         self.random_state = random_state
 
         self.rules_: Optional[List[Dict]] = None
+        self.statistics_: Optional[Dict[str, float]] = None
         self.feature_names_: Optional[List[str]] = None
         self.encoder_ = None
         self._discretized_data: Optional[pd.DataFrame] = None
         self._discretized_cols: Optional[List[str]] = None
 
-    def mine_rules(self, data: pd.DataFrame, compute_metrics: bool = True) -> List[Dict]:
+    def mine_rules(
+        self,
+        data: pd.DataFrame,
+        metrics: Optional[List[str]] = None
+    ) -> List[Dict]:
         """
         Extract association rules from data.
 
@@ -144,18 +153,23 @@ class RuleMiner:
 
         Args:
             data: DataFrame with features. Numerical columns will be discretized automatically.
-            compute_metrics: If True, compute quality metrics (support, confidence, etc.) for each rule.
+            metrics: List of metric names to compute. If None, computes all metrics.
+                     Options: 'support', 'confidence', 'rule_coverage', 'zhangs_metric', 'interestingness'
+                     Pass empty list [] to skip metric computation.
 
         Returns:
             List of rules. Each rule is a dictionary with:
                 - 'antecedents': List of conditions, e.g., [{'feature': 'age', 'value': 'Q3'}, ...]
                 - 'consequent': Single condition, e.g., {'feature': 'class', 'value': 'positive'}
-                - 'support': Rule support (if compute_metrics=True)
-                - 'confidence': Rule confidence (if compute_metrics=True)
-                - 'rule_coverage': Antecedent support (if compute_metrics=True)
-                - 'zhangs_metric': Zhang's correlation metric (if compute_metrics=True)
-                - 'interestingness': Interestingness score (if compute_metrics=True)
+                - Requested metrics (support, confidence, etc.)
         """
+        if metrics is None:
+            metrics = self.AVAILABLE_METRICS.copy()
+        else:
+            for m in metrics:
+                if m not in self.AVAILABLE_METRICS:
+                    raise ValueError(f"Unknown metric: '{m}'. Available: {self.AVAILABLE_METRICS}")
+
         discretized_data, discretized_cols = discretize_numerical(data, n_bins=self.n_bins)
         self._discretized_data = discretized_data
         self._discretized_cols = discretized_cols
@@ -188,9 +202,11 @@ class RuleMiner:
         )
 
         self.rules_ = rules
+        self.statistics_ = {'num_rules': len(rules)}
 
-        if compute_metrics and len(rules) > 0:
-            self.rules_ = self._compute_metrics(rules, discretized_data)
+        if len(metrics) > 0 and len(rules) > 0:
+            self.rules_, avg_metrics = self._compute_metrics(rules, discretized_data, metrics)
+            self.statistics_.update(avg_metrics)
 
         return self.rules_
 
@@ -306,26 +322,43 @@ class RuleMiner:
         aligned[:, :min(probs.shape[1], n_classes)] = probs[:, :min(probs.shape[1], n_classes)]
         return aligned
 
-    def _compute_metrics(self, rules: List[Dict], data: pd.DataFrame) -> List[Dict]:
+    def _compute_metrics(
+        self,
+        rules: List[Dict],
+        data: pd.DataFrame,
+        metrics: List[str]
+    ) -> Tuple[List[Dict], Dict[str, float]]:
         """Compute quality metrics for extracted rules."""
-        rules_with_metrics, _ = calculate_rule_metrics(
+        rules_with_metrics, avg_metrics = calculate_rule_metrics(
             rules=rules,
             data=data.values,
-            feature_names=self.feature_names_
+            feature_names=self.feature_names_,
+            metric_names=metrics
         )
-        return rules_with_metrics
+        return rules_with_metrics, avg_metrics
 
     def get_rules(self) -> List[Dict]:
         """Return the extracted rules."""
         return self.rules_ if self.rules_ is not None else []
+
+    def get_statistics(self) -> Dict[str, float]:
+        """
+        Return average statistics for the extracted rules.
+
+        Returns:
+            Dictionary with:
+                - 'num_rules': Number of rules extracted
+                - Average values for each computed metric
+                - 'data_coverage': Fraction of data covered by at least one rule
+        """
+        return self.statistics_ if self.statistics_ is not None else {}
 
     def to_dataframe(self) -> pd.DataFrame:
         """
         Convert extracted rules to a pandas DataFrame.
 
         Returns:
-            DataFrame with columns: antecedents, consequent, support, confidence,
-            rule_coverage, zhangs_metric, interestingness
+            DataFrame with columns: antecedents, consequent, and computed metrics
         """
         if not self.rules_:
             return pd.DataFrame()
@@ -335,14 +368,14 @@ class RuleMiner:
             ant_str = ' & '.join([f"{a['feature']}={a['value']}" for a in rule['antecedents']])
             cons_str = f"{rule['consequent']['feature']}={rule['consequent']['value']}"
 
-            rows.append({
+            row = {
                 'antecedents': ant_str,
                 'consequent': cons_str,
-                'support': rule.get('support'),
-                'confidence': rule.get('confidence'),
-                'rule_coverage': rule.get('rule_coverage'),
-                'zhangs_metric': rule.get('zhangs_metric'),
-                'interestingness': rule.get('interestingness'),
-            })
+            }
+            for metric in self.AVAILABLE_METRICS:
+                if metric in rule:
+                    row[metric] = rule[metric]
+
+            rows.append(row)
 
         return pd.DataFrame(rows)
