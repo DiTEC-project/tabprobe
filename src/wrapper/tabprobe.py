@@ -1,5 +1,5 @@
 """
-RuleMiner: Unified interface for association rule mining with tabular foundation models.
+TabProbe: Unified interface for association rule learning with tabular foundation models.
 """
 import gc
 from typing import List, Dict, Optional, Tuple
@@ -15,9 +15,9 @@ from src.utils.rule_quality import calculate_rule_metrics
 
 
 def discretize_numerical(
-    data: pd.DataFrame,
-    n_bins: int = 5,
-    categorical_threshold: int = 10
+        data: pd.DataFrame,
+        n_bins: int = 5,
+        categorical_threshold: int = 10
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Apply equal-frequency binning to numerical columns.
@@ -55,9 +55,9 @@ def discretize_numerical(
     return result, discretized_cols
 
 
-class RuleMiner:
+class TabProbe:
     """
-    Unified interface for association rule mining using tabular foundation models.
+    TabProbe: Unified interface for association rule mining using tabular foundation models.
 
     Supported methods:
         - 'tabpfn': TabPFN
@@ -89,15 +89,15 @@ class RuleMiner:
     AVAILABLE_METRICS = ['support', 'confidence', 'rule_coverage', 'zhangs_metric', 'interestingness']
 
     def __init__(
-        self,
-        method: str = 'tabicl',
-        max_antecedents: int = 2,
-        ant_similarity: float = 0.5,
-        cons_similarity: float = 0.8,
-        n_estimators: int = 8,
-        noise_factor: float = 0.5,
-        n_bins: int = 5,
-        random_state: int = 42,
+            self,
+            method: str = 'tabicl',
+            max_antecedents: int = 2,
+            ant_similarity: float = 0.5,
+            cons_similarity: float = 0.8,
+            n_estimators: int = 8,
+            noise_factor: float = 0.5,
+            n_bins: int = 5,
+            random_state: int = 42,
     ):
         """
         Initialize the RuleMiner.
@@ -139,9 +139,9 @@ class RuleMiner:
         self._discretized_cols: Optional[List[str]] = None
 
     def mine_rules(
-        self,
-        data: pd.DataFrame,
-        metrics: Optional[List[str]] = None
+            self,
+            data: pd.DataFrame,
+            metrics: Optional[List[str]] = None
     ) -> List[Dict]:
         """
         Extract association rules from data.
@@ -328,10 +328,10 @@ class RuleMiner:
         return aligned
 
     def _compute_metrics(
-        self,
-        rules: List[Dict],
-        data: pd.DataFrame,
-        metrics: List[str]
+            self,
+            rules: List[Dict],
+            data: pd.DataFrame,
+            metrics: List[str]
     ) -> Tuple[List[Dict], Dict[str, float]]:
         """Compute quality metrics for extracted rules."""
         rules_with_metrics, avg_metrics = calculate_rule_metrics(

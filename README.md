@@ -1,7 +1,10 @@
 # Association Rule Learning with Tabular Foundation Models
 
-This repository contains the experimental source code for the paper **"Tabular Foundation Models Can Learn Association Rules"**.
-In addition, it provides a reusable Python wrapper that enables researchers and practitioners to mine association rules
+This repository contains the experimental source code for the paper **"Tabular Foundation Models Can Learn Association
+Rules"**, TabProbe algorithm (Algorithm 2 in the paper) and the baselines.
+
+In addition, it provides a reusable Python
+wrapper that enables researchers and practitioners to mine association rules
 from tabular foundation models without having to reproduce the full experimental pipeline.
 
 The tabular foundation models supported both in the experiments and in the wrapper library are
@@ -23,9 +26,9 @@ and baselines used in the experiments.
 
 ```
 ├── src/
-│   ├── rulemining/                     # Reusable rule mining library from TFMs (TabPFNv2.5, TabICL, and TabDPT)
+│   ├── wrapper/                     # Reusable rule learning library from TFMs (TabPFNv2.5, TabICL, and TabDPT)
 │   │   ├── __init__.py
-│   │   └── rule_miner.py               # RuleMiner unified interface
+│   │   └── tabprobe.py              # TabProbe: unified interface for all TFMs
 │   ├── experiments/
 │   │   ├── rule_mining/                # Association rule mining experiments
 │   │   │   ├── tabpfn_experiments.py
@@ -171,13 +174,13 @@ Rule learning with tabular foundation models can then be run on the categorical 
 
 ```python
 from ucimlrepo import fetch_ucirepo
-from src.wrapper import RuleMiner
+from src.wrapper import TabProbe
 
 # Load breast cancer dataset from UCI ML repository
 dataset = fetch_ucirepo(id=14).data.features
 
 # Mine rules with TabPFN
-miner = RuleMiner(method='tabicl', ant_similarity=0.5, cons_similarity=0.8)
+miner = TabProbe(method='tabicl', ant_similarity=0.5, cons_similarity=0.8)
 rules = miner.mine_rules(dataset, metrics=["support", "confidence"])
 
 # print rule quality statistics
@@ -204,7 +207,7 @@ Applying k-means discretization via pyaerial:
 ```
 from ucimlrepo import fetch_ucirepo
 from aerial import discretization
-from src.wrapper import RuleMiner
+from src.wrapper import TabProbe
 
 # Load fertility dataset from UCI ML repository
 dataset = fetch_ucirepo(id=244).data.features
@@ -213,24 +216,24 @@ dataset = fetch_ucirepo(id=244).data.features
 discrete_df = discretization.equal_width_discretization(dataset, n_bins=5)
 
 # Mine rules with TabICL
-miner = RuleMiner(method='tabicl', ant_similarity=0.5, cons_similarity=0.8)
+miner = TabProbe(method='tabicl', ant_similarity=0.5, cons_similarity=0.8)
 rules = miner.mine_rules(discrete_df, metrics=["support", "confidence"])
 ```
 
 **Parameters**
 
-The `RuleMiner` class exposes the following parameters:
+The `TabProbe` class exposes the following parameters:
 
 ```python
-RuleMiner(
-    method='tabicl',        # Foundation model to use: 'tabpfn', 'tabicl', or 'tabdpt'
-    max_antecedents=2,      # Maximum number of items allowed in the rule antecedent
-    ant_similarity=0.5,     # Similarity threshold for validating antecedents (0.0–1.0)
-    cons_similarity=0.8,    # Similarity threshold for extracting consequents (0.0–1.0)
-    n_estimators=8,         # Number of ensemble estimators for prediction averaging
-    noise_factor=0.5,       # Gaussian noise factor added to context data
-    n_bins=5,               # Number of bins for discretizing numerical features
-    random_state=42         # Random seed for reproducibility
+TabProbe(
+    method='tabicl',  # Foundation model to use: 'tabpfn', 'tabicl', or 'tabdpt'
+    max_antecedents=2,  # Maximum number of items allowed in the rule antecedent
+    ant_similarity=0.5,  # Similarity threshold for validating antecedents (0.0–1.0)
+    cons_similarity=0.8,  # Similarity threshold for extracting consequents (0.0–1.0)
+    n_estimators=8,  # Number of ensemble estimators for prediction averaging
+    noise_factor=0.5,  # Gaussian noise factor added to context data
+    n_bins=5,  # Number of bins for discretizing numerical features
+    random_state=42  # Random seed for reproducibility
 )
 ```
 
