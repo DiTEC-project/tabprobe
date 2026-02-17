@@ -1,7 +1,7 @@
 # Association Rule Learning with Tabular Foundation Models
 
-This repository contains the experimental source code for the paper **"Tabular Foundation Models Can Learn Association
-Rules"**, TabProbe algorithm (Algorithm 2 in the paper) and the baselines.
+This repository contains the experimental source code for the paper [Tabular Foundation Models Can Learn Association
+Rules](https://arxiv.org/abs/2602.14622), TabProbe algorithm (Algorithm 2 in the paper) and the baselines.
 
 In addition, it provides a reusable Python
 wrapper that enables researchers and practitioners to mine association rules
