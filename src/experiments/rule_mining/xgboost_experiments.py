@@ -1,19 +1,18 @@
 """
-TabPFN-based Rule Extraction using TabProbe
+XGBoost-based Rule Extraction using TabProbe
 """
 
 import time
 import os
+import json
 import numpy as np
 import pandas as pd
 from datetime import datetime
 
-import torch
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tabpfn import TabPFNClassifier
-from tabpfn_extensions.many_class import ManyClassClassifier
+from xgboost import XGBClassifier
 
-from src.utils.data_prep import prepare_categorical_data, add_gaussian_noise
+from src.utils.data_prep import prepare_categorical_data
 from src.utils.test_matrix import generate_test_matrix
 from src.utils.rule_extraction import extract_rules_from_reconstruction
 from src.utils import (
@@ -25,27 +24,35 @@ from src.utils import (
     convert_metrics_to_stats,
 )
 
+try:
+    import torch as _torch
 
-def _process_feature_tabpfn(feat_info, noisy_context, context_table, query_matrix,
-                            n_queries, n_estimators, random_state, device, query_batch_size):
+    _CUDA_AVAILABLE = _torch.cuda.is_available()
+except ImportError:
+    _CUDA_AVAILABLE = False
+
+
+def _process_feature_xgb(feat_info, context_table, query_matrix,
+                         n_queries, n_estimators, max_depth, learning_rate,
+                         random_state, query_batch_size, device):
     start_idx, end_idx = feat_info['start'], feat_info['end']
     n_classes = end_idx - start_idx
 
-    x_context = np.delete(noisy_context, range(start_idx, end_idx), axis=1)
+    x_context = np.delete(context_table, range(start_idx, end_idx), axis=1)
     y_context = np.argmax(context_table[:, start_idx:end_idx], axis=1)
 
     if len(np.unique(y_context)) < 2:
         return start_idx, end_idx, np.full((n_queries, n_classes), 1.0 / n_classes)
 
-    base = TabPFNClassifier(
+    model = XGBClassifier(
         n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
         random_state=random_state,
-        average_before_softmax=True,
-        inference_precision='auto',
-        device=device
+        verbosity=0,
+        eval_metric='mlogloss',
+        device=device,
     )
-    model = (ManyClassClassifier(estimator=base, alphabet_size=10, random_state=random_state)
-             if n_classes > 10 else base)
     model.fit(x_context, y_context)
 
     x_query = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
@@ -55,117 +62,83 @@ def _process_feature_tabpfn(feat_info, noisy_context, context_table, query_matri
 
     if probs.shape[1] != n_classes:
         aligned = np.zeros((n_queries, n_classes))
-        if hasattr(model, 'classes_'):
-            for i, cls in enumerate(model.classes_):
-                if int(cls) < n_classes:
-                    aligned[:, int(cls)] = probs[:, i]
-        else:
-            mc = min(probs.shape[1], n_classes)
-            aligned[:, :mc] = probs[:, :mc]
+        for i, cls in enumerate(model.classes_):
+            if int(cls) < n_classes:
+                aligned[:, int(cls)] = probs[:, i]
         probs = aligned
 
     return start_idx, end_idx, probs
 
 
-def adapt_tabpfn_for_reconstruction(tabpfn_model, context_table, query_matrix,
-                                    feature_value_indices, n_samples=None, noise_factor=0.5,
-                                    max_workers=1, query_batch_size=512):
-    print(context_samples)
+def adapt_xgb_for_reconstruction(context_table, query_matrix, feature_value_indices,
+                                 n_samples=None, n_estimators=100, max_depth=3,
+                                 learning_rate=0.3, random_state=42,
+                                 max_workers=1, query_batch_size=512, device='cpu'):
     if n_samples and len(context_table) > n_samples:
         context_table = context_table[:n_samples]
 
-    noisy_context = add_gaussian_noise(context_table, noise_factor=noise_factor)
     n_queries = query_matrix.shape[0]
     n_features_total = query_matrix.shape[1]
     reconstruction_probs = np.zeros((n_queries, n_features_total))
 
-    n_estimators = getattr(tabpfn_model, 'n_estimators', 8)
-    random_state = getattr(tabpfn_model, 'random_state', 42)
-    device = getattr(tabpfn_model, 'device', 'cuda' if torch.cuda.is_available() else 'cpu')
-
     print(f"    Reconstructing {len(feature_value_indices)} features for {n_queries} queries "
-          f"(workers={max_workers}, batch_size={query_batch_size})...")
+          f"(workers={max_workers}, batch_size={query_batch_size}, device={device})...")
 
-    shared = (noisy_context, context_table, query_matrix, n_queries,
-              n_estimators, random_state, device, query_batch_size)
+    shared = (context_table, query_matrix, n_queries,
+              n_estimators, max_depth, learning_rate, random_state, query_batch_size, device)
 
     if max_workers > 1:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(_process_feature_tabpfn, fi, *shared): fi
+            futures = {executor.submit(_process_feature_xgb, fi, *shared): fi
                        for fi in feature_value_indices}
             for future in as_completed(futures):
                 s, e, probs = future.result()
                 reconstruction_probs[:, s:e] = probs
     else:
         for fi in feature_value_indices:
-            s, e, probs = _process_feature_tabpfn(fi, *shared)
+            s, e, probs = _process_feature_xgb(fi, *shared)
             reconstruction_probs[:, s:e] = probs
 
     return reconstruction_probs
 
 
-def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100, n_estimators=8,
-                         ant_similarity=0.5, cons_similarity=0.8, random_state=42,
-                         max_workers=1, query_batch_size=512):
-    """
-    End-to-end unsupervised rule learning using TabPFN.
-
-    Args:
-        dataset: DataFrame with categorical features
-        max_antecedents: Maximum antecedents per rule
-        context_samples: Number of samples to use as context
-        ant_similarity: Antecedent threshold
-        cons_similarity: Consequent threshold
-        random_state: Random seed for TabPFN model (for reproducibility)
-        n_estimators
-
-    Returns:
-        rules: List of extracted association rules
-    """
-
-    # Prepare data
+def xgb_rule_learning(dataset, max_antecedents=2, context_samples=None,
+                      n_estimators=100, max_depth=3, learning_rate=0.3,
+                      ant_similarity=0.5, cons_similarity=0.8, random_state=42,
+                      max_workers=1, query_batch_size=512, device='cpu'):
     encoded_data, classes_per_feature, feature_names, encoder = prepare_categorical_data(dataset)
 
     print(f"Dataset shape: {encoded_data.shape}")
     print(f"Number of features: {len(classes_per_feature)}")
     print(f"Classes per feature: {classes_per_feature}")
 
-    # Generate test matrix (query patterns)
-    # Use equal probabilities for unmarked features (NOT zeros)
-    # Since we add noise to the context, TabPFN will see values between 0 and 1,
-    # making [0.33, 0.33, 0.33] patterns more natural and consistent with the training distribution
     test_matrix, test_descriptions, feature_value_indices = generate_test_matrix(
         n_features=len(classes_per_feature),
         classes_per_feature=classes_per_feature,
         max_antecedents=max_antecedents,
-        use_zeros_for_unmarked=False  # Equal probabilities work better with noisy context
+        use_zeros_for_unmarked=False
     )
 
     print(f"\nTest matrix shape: {test_matrix.shape}")
     print(f"Number of test vectors: {len(test_descriptions)}")
 
-    tabpfn_model = TabPFNClassifier(
-        n_estimators=n_estimators,
-        random_state=random_state,
-        average_before_softmax=True,
-        inference_precision='auto'
-    )
-
-    # Adapt TabPFN for reconstruction
-    print(f"\nUsing TabPFN for pattern reconstruction...")
-    reconstruction_probs = adapt_tabpfn_for_reconstruction(
-        tabpfn_model=tabpfn_model,
+    print(f"\nUsing XGBoost for pattern reconstruction...")
+    reconstruction_probs = adapt_xgb_for_reconstruction(
         context_table=encoded_data,
         query_matrix=test_matrix,
         feature_value_indices=feature_value_indices,
         n_samples=context_samples,
+        n_estimators=n_estimators,
+        max_depth=max_depth,
+        learning_rate=learning_rate,
+        random_state=random_state,
         max_workers=max_workers,
-        query_batch_size=query_batch_size
+        query_batch_size=query_batch_size,
+        device=device,
     )
 
     print(f"Reconstruction shape: {reconstruction_probs.shape}")
 
-    # Extract rules using PyAerial logic
     print(f"\nExtracting rules...")
     rules = extract_rules_from_reconstruction(
         prob_matrix=reconstruction_probs,
@@ -174,7 +147,7 @@ def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100, n_esti
         ant_similarity=ant_similarity,
         cons_similarity=cons_similarity,
         feature_names=feature_names,
-        encoder=encoder  # Pass encoder to map class indices to actual values
+        encoder=encoder
     )
 
     print(f"{len(rules)} rules found!")
@@ -182,39 +155,49 @@ def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100, n_esti
     return rules, feature_names, dataset.values
 
 
-# Main execution
 if __name__ == "__main__":
     print("=" * 80)
-    print("TabPFN Baseline for Rule Learning")
+    print("XGBoost Baseline for Rule Learning")
     print("=" * 80)
 
-    # Parameters
-    n_runs = 10
+    n_runs = 1
     max_antecedents = 2
     ant_similarity = 0.5
     cons_similarity = 0.8
-    context_samples = None
-    base_seed = 42  # Base seed for reproducibility
+    base_seed = 42
+    # Defaults used when no tuned params exist for a dataset
+    default_n_estimators = 100
+    default_max_depth = 3
+    default_learning_rate = 0.3
     max_workers = 4
     query_batch_size = 4096
+    device = 'cuda' if _CUDA_AVAILABLE else 'cpu'
 
-    # Generate seed sequence for all runs
+    print(f"Device: {device}")
+
+    params_json = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "xgboost_best_parameters.json")
+    )
+    if os.path.exists(params_json):
+        with open(params_json) as f:
+            best_params_by_dataset = json.load(f)
+        print(f"Loaded tuned parameters from {params_json}")
+    else:
+        best_params_by_dataset = {}
+        print(f"No tuned parameters found at {params_json}, using defaults for all datasets.")
+
     print(f"\nGenerating seed sequence from base_seed={base_seed}...")
     seed_sequence = generate_seed_sequence(base_seed, n_runs)
     print(f"Seeds for {n_runs} runs: {seed_sequence}")
 
-    # Load datasets (runs on all datasets by default)
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="small")
+    datasets = get_ucimlrepo_datasets(size="normal", names=["breast_cancer"])
 
-    # Create output directory
     os.makedirs("out", exist_ok=True)
 
-    # Results storage - store all individual runs
     all_individual_results = []
     all_average_results = []
 
-    # Run experiments for each dataset
     for dataset_info in datasets:
         dataset_name = dataset_info['name']
         dataset = dataset_info['data']
@@ -224,49 +207,47 @@ if __name__ == "__main__":
         print("=" * 80)
         print(f"Shape: {dataset.shape}")
 
-        # Storage for this dataset's runs
+        tuned = best_params_by_dataset.get(dataset_name, {})
+        n_estimators = tuned.get('n_estimators', default_n_estimators)
+        max_depth = tuned.get('max_depth', default_max_depth)
+        learning_rate = tuned.get('learning_rate', default_learning_rate)
+        if tuned:
+            print(f"Using tuned params: n_estimators={n_estimators}, "
+                  f"max_depth={max_depth}, learning_rate={learning_rate:.4f}")
+        else:
+            print(f"Using default params: n_estimators={n_estimators}, "
+                  f"max_depth={max_depth}, learning_rate={learning_rate}")
+
         dataset_runs = []
 
-        # Run N times
         for run_idx in range(n_runs):
             run_seed = seed_sequence[run_idx]
             print(f"\n--- Run {run_idx + 1}/{n_runs} (seed={run_seed}) ---")
 
-            # Set global seed for this run
             set_seed(run_seed)
-
-            # Track peak GPU memory
-            if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()
-                initial_gpu_memory = torch.cuda.memory_allocated() / 1024 ** 2
 
             start_time = time.time()
 
-            extracted_rules, feature_names, original_data = tabpfn_rule_learning(
+            extracted_rules, feature_names, original_data = xgb_rule_learning(
                 dataset=dataset,
                 max_antecedents=max_antecedents,
-                context_samples=context_samples if context_samples else dataset.shape[0],
                 ant_similarity=ant_similarity,
                 cons_similarity=cons_similarity,
+                n_estimators=n_estimators,
+                max_depth=max_depth,
+                learning_rate=learning_rate,
                 random_state=run_seed,
                 max_workers=max_workers,
-                query_batch_size=query_batch_size
+                query_batch_size=query_batch_size,
+                device=device,
             )
 
             end_time = time.time()
             elapsed_time = end_time - start_time
 
-            # Get peak GPU memory usage
-            peak_gpu_memory_mb = 0.0
-            if torch.cuda.is_available():
-                peak_gpu_memory_mb = torch.cuda.max_memory_allocated() / 1024 ** 2
-
             print(f"\nRun {run_idx + 1} completed in {elapsed_time:.2f} seconds")
             print(f"Extracted {len(extracted_rules)} rules")
-            if torch.cuda.is_available():
-                print(f"Peak GPU Memory: {peak_gpu_memory_mb:.2f} MB")
 
-            # Calculate metrics and save rules
             if len(extracted_rules) > 0:
                 rules_with_metrics, avg_metrics = calculate_rule_metrics(
                     rules=extracted_rules,
@@ -274,15 +255,13 @@ if __name__ == "__main__":
                     feature_names=feature_names
                 )
 
-                # Convert to stats format
                 stats = convert_metrics_to_stats(avg_metrics)
 
-                # Save rules to JSON (for CBA/CORELS classification later)
                 rules_file = save_rules(
                     rules=rules_with_metrics,
                     stats=stats,
                     dataset_name=dataset_name,
-                    method_name="tabpfn",
+                    method_name="xgboost",
                     seed=run_seed
                 )
                 print(f"Rules saved to {rules_file}")
@@ -295,7 +274,6 @@ if __name__ == "__main__":
                 print(f"  Rule coverage: {avg_metrics['rule_coverage']:.4f}")
                 print(f"  Data coverage: {avg_metrics['data_coverage']:.4f}")
 
-                # Store results for this run
                 result = {
                     'dataset': dataset_name,
                     'run': run_idx + 1,
@@ -309,7 +287,6 @@ if __name__ == "__main__":
                     'avg_rule_coverage': avg_metrics['rule_coverage'],
                     'data_coverage': avg_metrics['data_coverage'],
                     'execution_time': elapsed_time,
-                    'peak_gpu_memory_mb': peak_gpu_memory_mb
                 }
             else:
                 print("  WARNING: No rules extracted!")
@@ -326,14 +303,11 @@ if __name__ == "__main__":
                     'avg_rule_coverage': 0.0,
                     'data_coverage': 0.0,
                     'execution_time': elapsed_time,
-                    'peak_gpu_memory_mb': peak_gpu_memory_mb
                 }
 
             dataset_runs.append(result)
             all_individual_results.append(result)
 
-        # Calculate averages across runs for this dataset
-        # Only average rule metrics over runs that produced rules (>0 rules)
         runs_with_rules = [r for r in dataset_runs if r['num_rules'] > 0]
         n_runs_with_rules = len(runs_with_rules)
 
@@ -349,7 +323,6 @@ if __name__ == "__main__":
                 'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in runs_with_rules]),
                 'data_coverage': np.mean([r['data_coverage'] for r in runs_with_rules]),
                 'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
-                'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
             }
         else:
             avg_result = {
@@ -363,7 +336,6 @@ if __name__ == "__main__":
                 'avg_rule_coverage': 0.0,
                 'data_coverage': 0.0,
                 'execution_time': np.mean([r['execution_time'] for r in dataset_runs]),
-                'peak_gpu_memory_mb': np.mean([r['peak_gpu_memory_mb'] for r in dataset_runs])
             }
         all_average_results.append(avg_result)
 
@@ -377,34 +349,32 @@ if __name__ == "__main__":
         print(f"  Rule Coverage: {avg_result['avg_rule_coverage']:.4f}")
         print(f"  Data Coverage: {avg_result['data_coverage']:.4f}")
         print(f"  Avg Time: {avg_result['execution_time']:.2f}s")
-        print(f"  Avg Peak GPU Memory: {avg_result['peak_gpu_memory_mb']:.2f} MB")
 
-    # Save results to Excel with multiple sheets
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_filename = f"out/tabpfn_{timestamp}.xlsx"
+    output_filename = f"out/xgboost_{timestamp}.xlsx"
 
     with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
-        # Sheet 1: Individual run results
         individual_df = pd.DataFrame(all_individual_results)
         individual_df.to_excel(writer, sheet_name='Individual Results', index=False)
 
-        # Sheet 2: Average results per dataset
         average_df = pd.DataFrame(all_average_results)
         average_df.to_excel(writer, sheet_name='Average Results', index=False)
 
-        # Sheet 3: Parameters
         params_df = pd.DataFrame([{
             'n_runs': n_runs,
             'base_seed': base_seed,
             'max_antecedents': max_antecedents,
             'ant_similarity': ant_similarity,
             'cons_similarity': cons_similarity,
+            'default_n_estimators': default_n_estimators,
+            'default_max_depth': default_max_depth,
+            'default_learning_rate': default_learning_rate,
+            'device': device,
             'max_workers': max_workers,
-            'query_batch_size': query_batch_size
+            'query_batch_size': query_batch_size,
         }])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
 
-        # Sheet 4: Seed Sequence (for reproducibility)
         seeds_df = pd.DataFrame({
             'run': list(range(1, n_runs + 1)),
             'seed': seed_sequence
@@ -415,6 +385,6 @@ if __name__ == "__main__":
     print(f"Results saved to {output_filename}")
     print(f"  - Sheet 1: Individual Results (all {n_runs * len(datasets)} runs)")
     print(f"  - Sheet 2: Average Results (per dataset)")
-    print(f"  - Sheet 3: Parameters (including base_seed={base_seed})")
+    print(f"  - Sheet 3: Parameters")
     print(f"  - Sheet 4: Seeds (seed sequence for reproducibility)")
     print("=" * 80)

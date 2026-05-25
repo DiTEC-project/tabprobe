@@ -1,0 +1,62 @@
+{
+  "hepatitis": {
+    "max_depth": 4,
+    "learning_rate": 0.02565484402828396,
+    "n_estimators": 124,
+    "best_objective": 0.14076029042297872
+  },
+  "cervical_cancer_behavior_risk": {
+    "max_depth": 4,
+    "learning_rate": 0.04595135397062091,
+    "n_estimators": 38,
+    "best_objective": 0.8203281312525014
+  },
+  "autism_screening_adolescent": {
+    "max_depth": 6,
+    "learning_rate": 0.01426507262901028,
+    "n_estimators": 37,
+    "best_objective": 0.279169997760155
+  },
+  "acute_inflammations": {
+    "max_depth": 3,
+    "learning_rate": 0.010163026590675417,
+    "n_estimators": 74,
+    "best_objective": 0.516107907573984
+  },
+  "fertility": {
+    "max_depth": 5,
+    "learning_rate": 0.29235597798824087,
+    "n_estimators": 82,
+    "best_objective": 0.08125136925531602
+  },
+  "breast_cancer": {
+    "max_depth": 6,
+    "learning_rate": 0.020589728197687916,
+    "n_estimators": 52,
+    "best_objective": 0.4978050921861282
+  },
+  "congressional_voting": {
+    "max_depth": 6,
+    "learning_rate": 0.011821268820086012,
+    "n_estimators": 101,
+    "best_objective": 0.8769948479940072
+  },
+  "mushroom": {
+    "max_depth": 3,
+    "learning_rate": 0.2536999076681772,
+    "n_estimators": 152,
+    "best_objective": 0.0
+  },
+  "chess_king_rook_vs_king_pawn": {
+    "max_depth": 3,
+    "learning_rate": 0.029552056658128146,
+    "n_estimators": 32,
+    "best_objective": 0.07576272054722152
+  },
+  "spambase": {
+    "max_depth": 2,
+    "learning_rate": 0.05467885043471149,
+    "n_estimators": 108,
+    "best_objective": 0.029436905412488744
+  }
+}

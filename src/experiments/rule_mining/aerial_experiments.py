@@ -1,7 +1,7 @@
 """
-PyAerial Rule Learning Experiments
+Aerial Rule Learning Experiments
 
-This module runs association rule mining experiments using PyAerial.
+This module runs association rule mining experiments using Aerial.
 """
 import time
 import os
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     base_seed = 42  # Base seed for reproducibility
 
     # Dataset size: 'normal' or 'small'
-    dataset_size = "small"
+    dataset_size = "normal"
 
     # Generate seed sequence for all runs
     print(f"\nGenerating seed sequence from base_seed={base_seed}...")
@@ -254,6 +254,7 @@ if __name__ == "__main__":
                 print(f"  Support: {stats.get('average_support', 0):.4f}")
                 print(f"  Confidence: {stats.get('average_confidence', 0):.4f}")
                 print(f"  Zhang's Metric: {stats.get('average_zhangs_metric', 0):.4f}")
+                print(f"  |Zhang's Metric|: {abs(stats.get('average_zhangs_metric', 0)):.4f}")
                 print(f"  Interestingness: {stats.get('average_interestingness', 0):.4f}")
                 print(f"  Rule coverage: {stats.get('average_coverage', 0):.4f}")
                 print(f"  Data coverage: {stats.get('data_coverage', 0):.4f}")
@@ -267,6 +268,7 @@ if __name__ == "__main__":
                     'avg_support': stats.get('average_support', 0),
                     'avg_confidence': stats.get('average_confidence', 0),
                     'avg_zhangs_metric': stats.get('average_zhangs_metric', 0),
+                    'avg_abs_zhangs_metric': abs(stats.get('average_zhangs_metric', 0)),
                     'avg_interestingness': stats.get('average_interestingness', 0),
                     'avg_rule_coverage': stats.get('average_coverage', 0),
                     'data_coverage': stats.get('data_coverage', 0),
@@ -283,6 +285,7 @@ if __name__ == "__main__":
                     'avg_support': 0.0,
                     'avg_confidence': 0.0,
                     'avg_zhangs_metric': 0.0,
+                    'avg_abs_zhangs_metric': 0.0,
                     'avg_interestingness': 0.0,
                     'avg_rule_coverage': 0.0,
                     'data_coverage': 0.0,
@@ -305,6 +308,7 @@ if __name__ == "__main__":
                 'avg_support': np.mean([r['avg_support'] for r in runs_with_rules]),
                 'avg_confidence': np.mean([r['avg_confidence'] for r in runs_with_rules]),
                 'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in runs_with_rules]),
+                'avg_abs_zhangs_metric': np.mean([r['avg_abs_zhangs_metric'] for r in runs_with_rules]),
                 'avg_interestingness': np.mean([r['avg_interestingness'] for r in runs_with_rules]),
                 'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in runs_with_rules]),
                 'data_coverage': np.mean([r['data_coverage'] for r in runs_with_rules]),
@@ -318,6 +322,7 @@ if __name__ == "__main__":
                 'avg_support': 0.0,
                 'avg_confidence': 0.0,
                 'avg_zhangs_metric': 0.0,
+                'avg_abs_zhangs_metric': 0.0,
                 'avg_interestingness': 0.0,
                 'avg_rule_coverage': 0.0,
                 'data_coverage': 0.0,
@@ -331,6 +336,7 @@ if __name__ == "__main__":
         print(f"  Support: {avg_result['avg_support']:.4f}")
         print(f"  Confidence: {avg_result['avg_confidence']:.4f}")
         print(f"  Zhang's Metric: {avg_result['avg_zhangs_metric']:.4f}")
+        print(f"  |Zhang's Metric|: {avg_result['avg_abs_zhangs_metric']:.4f}")
         print(f"  Interestingness: {avg_result['avg_interestingness']:.4f}")
         print(f"  Rule Coverage: {avg_result['avg_rule_coverage']:.4f}")
         print(f"  Data Coverage: {avg_result['data_coverage']:.4f}")

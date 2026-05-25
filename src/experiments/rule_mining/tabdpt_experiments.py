@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import torch
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tabdpt import TabDPTClassifier
 
@@ -41,105 +42,88 @@ def filter_single_value_columns(df):
     return df
 
 
-def adapt_tabdpt_for_reconstruction(context_table, query_matrix,
-                                    feature_value_indices, noise_factor=0.5,
-                                    n_ensembles=8, query_batch_size=512, random_state=42):
-    """Adapt TabDPT for reconstruction by fitting one model per feature.
+def _process_feature_tabdpt(feat_info, noisy_context, context_table, query_matrix,
+                             n_queries, n_ensembles, context_size, random_state, query_batch_size):
+    start_idx, end_idx = feat_info['start'], feat_info['end']
+    n_classes = end_idx - start_idx
 
-    Always uses the entire context_table (no sampling).
-    """
+    x_context = np.delete(noisy_context, range(start_idx, end_idx), axis=1)
+    y_context = np.argmax(context_table[:, start_idx:end_idx], axis=1)
 
-    # Always use the full context table
-    context_size = len(context_table)
+    if len(np.unique(y_context)) < 2:
+        return start_idx, end_idx, np.full((n_queries, n_classes), 1.0 / n_classes)
 
-    print(f"    Adding Gaussian noise (factor={noise_factor}) to context...")
-    noisy_context = add_gaussian_noise(context_table, noise_factor=noise_factor)
+    model = TabDPTClassifier()
+    model.fit(x_context, y_context)
 
-    n_queries = query_matrix.shape[0]
-    n_features_total = query_matrix.shape[1]
-
-    reconstruction_probs = np.zeros((n_queries, n_features_total))
-
-    n_batches = (n_queries + query_batch_size - 1) // query_batch_size
-
-    print(f"    Reconstructing all features for {n_queries} queries...")
-    print(f"    Training {len(feature_value_indices)} feature predictors...")
-    print(f"    Using n_ensembles={n_ensembles}, context_size={context_size}")
-    if n_batches > 1:
-        print(f"    Processing queries in {n_batches} batches of {query_batch_size}")
-
-    for feat_idx, feat_info in enumerate(feature_value_indices):
-        start_idx = feat_info['start']
-        end_idx = feat_info['end']
-        n_classes = end_idx - start_idx
-
-        print(f"        Feature {feat_idx}: classes={n_classes}, range=[{start_idx}:{end_idx}]")
-
-        x_context = np.delete(noisy_context, range(start_idx, end_idx), axis=1)
-        y_context_onehot = context_table[:, start_idx:end_idx]
-        y_context = np.argmax(y_context_onehot, axis=1)
-
-        # Skip features with only one unique class (constant features)
-        unique_classes = np.unique(y_context)
-        if len(unique_classes) < 2:
-            print(f"        Skipping feature {feat_idx}: only {len(unique_classes)} unique class(es)")
-            # Set uniform probabilities for constant features
-            reconstruction_probs[:, start_idx:end_idx] = 1.0 / n_classes
-            continue
-
-        tabdpt_model = TabDPTClassifier()
-        tabdpt_model.fit(x_context, y_context)
-
-        x_query_full = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
-
-        all_probs = []
-        for batch_idx in range(n_batches):
-            batch_start = batch_idx * query_batch_size
-            batch_end = min((batch_idx + 1) * query_batch_size, n_queries)
-            x_query_batch = x_query_full[batch_start:batch_end]
-
-            batch_probs = tabdpt_model.ensemble_predict_proba(
-                x_query_batch,
-                n_ensembles=n_ensembles,
-                context_size=context_size,
-                seed=random_state
-            )
-            all_probs.append(batch_probs)
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-
-        probs = np.vstack(all_probs)
-
-        if probs.shape[1] != n_classes:
-            print(f"        WARNING: predict_proba returned {probs.shape[1]} classes, expected {n_classes}")
-            # Create proper sized array and fill with available probabilities
-            proper_probs = np.zeros((n_queries, n_classes))
-            # Get the classes TabDPT actually learned
-            if hasattr(tabdpt_model, 'classes_'):
-                for i, cls in enumerate(tabdpt_model.classes_):
-                    if cls < n_classes:
-                        proper_probs[:, cls] = probs[:, i]
-            else:
-                # Assume sequential classes starting from 0
-                min_cols = min(probs.shape[1], n_classes)
-                proper_probs[:, :min_cols] = probs[:, :min_cols]
-            reconstruction_probs[:, start_idx:end_idx] = proper_probs
-        else:
-            reconstruction_probs[:, start_idx:end_idx] = probs
-
-        # Clean up to free memory
-        del tabdpt_model
+    x_query_full = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
+    batches = []
+    for b in range(0, n_queries, query_batch_size):
+        batch_probs = model.ensemble_predict_proba(
+            x_query_full[b:b + query_batch_size],
+            n_ensembles=n_ensembles,
+            context_size=context_size,
+            seed=random_state
+        )
+        batches.append(batch_probs)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        gc.collect()
+    probs = np.vstack(batches)
+
+    if probs.shape[1] != n_classes:
+        aligned = np.zeros((n_queries, n_classes))
+        if hasattr(model, 'classes_'):
+            for i, cls in enumerate(model.classes_):
+                if int(cls) < n_classes:
+                    aligned[:, int(cls)] = probs[:, i]
+        else:
+            mc = min(probs.shape[1], n_classes)
+            aligned[:, :mc] = probs[:, :mc]
+        probs = aligned
+
+    del model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+
+    return start_idx, end_idx, probs
+
+
+def adapt_tabdpt_for_reconstruction(context_table, query_matrix,
+                                    feature_value_indices, noise_factor=0.5,
+                                    n_ensembles=8, query_batch_size=512, random_state=42,
+                                    max_workers=1):
+    context_size = len(context_table)
+    noisy_context = add_gaussian_noise(context_table, noise_factor=noise_factor)
+    n_queries = query_matrix.shape[0]
+    n_features_total = query_matrix.shape[1]
+    reconstruction_probs = np.zeros((n_queries, n_features_total))
+
+    print(f"    Reconstructing {len(feature_value_indices)} features for {n_queries} queries "
+          f"(workers={max_workers}, batch_size={query_batch_size})...")
+
+    shared = (noisy_context, context_table, query_matrix, n_queries,
+              n_ensembles, context_size, random_state, query_batch_size)
+
+    if max_workers > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_feature_tabdpt, fi, *shared): fi
+                       for fi in feature_value_indices}
+            for future in as_completed(futures):
+                s, e, probs = future.result()
+                reconstruction_probs[:, s:e] = probs
+    else:
+        for fi in feature_value_indices:
+            s, e, probs = _process_feature_tabdpt(fi, *shared)
+            reconstruction_probs[:, s:e] = probs
 
     return reconstruction_probs
 
 
 def tabdpt_rule_learning(dataset, max_antecedents=2,
                          ant_similarity=0.5, cons_similarity=0.8,
-                         n_ensembles=8, random_state=42):
+                         n_ensembles=8, random_state=42,
+                         max_workers=1, query_batch_size=512):
     """End-to-end rule learning using TabDPT.
 
     Always uses the entire dataset as context.
@@ -173,7 +157,9 @@ def tabdpt_rule_learning(dataset, max_antecedents=2,
         query_matrix=test_matrix,
         feature_value_indices=feature_value_indices,
         n_ensembles=n_ensembles,
-        random_state=random_state
+        random_state=random_state,
+        max_workers=max_workers,
+        query_batch_size=query_batch_size
     )
 
     print(f"Reconstruction shape: {reconstruction_probs.shape}")
@@ -208,6 +194,8 @@ if __name__ == "__main__":
     cons_similarity = 0.8
     n_ensembles = 8
     base_seed = 42  # Base seed for reproducibility
+    max_workers = 1  # TabDPT uses torch.compile/dynamo internally; not thread-safe with ThreadPoolExecutor
+    query_batch_size = 4096
 
     # Generate seed sequence for all runs
     print(f"\nGenerating seed sequence from base_seed={base_seed}...")
@@ -263,7 +251,9 @@ if __name__ == "__main__":
                 ant_similarity=ant_similarity,
                 cons_similarity=cons_similarity,
                 n_ensembles=n_ensembles,
-                random_state=run_seed
+                random_state=run_seed,
+                max_workers=max_workers,
+                query_batch_size=query_batch_size
             )
 
             end_time = time.time()
@@ -303,6 +293,7 @@ if __name__ == "__main__":
                 print(f"  Support: {avg_metrics['support']:.4f}")
                 print(f"  Confidence: {avg_metrics['confidence']:.4f}")
                 print(f"  Zhang's Metric: {avg_metrics['zhangs_metric']:.4f}")
+                print(f"  |Zhang's Metric|: {abs(avg_metrics['zhangs_metric']):.4f}")
                 print(f"  Interestingness: {avg_metrics['interestingness']:.4f}")
                 print(f"  Rule coverage: {avg_metrics['rule_coverage']:.4f}")
                 print(f"  Data coverage: {avg_metrics['data_coverage']:.4f}")
@@ -316,6 +307,7 @@ if __name__ == "__main__":
                     'avg_support': avg_metrics['support'],
                     'avg_confidence': avg_metrics['confidence'],
                     'avg_zhangs_metric': avg_metrics['zhangs_metric'],
+                    'avg_abs_zhangs_metric': abs(avg_metrics['zhangs_metric']),
                     'avg_interestingness': avg_metrics['interestingness'],
                     'avg_rule_coverage': avg_metrics['rule_coverage'],
                     'data_coverage': avg_metrics['data_coverage'],
@@ -332,6 +324,7 @@ if __name__ == "__main__":
                     'avg_support': 0.0,
                     'avg_confidence': 0.0,
                     'avg_zhangs_metric': 0.0,
+                    'avg_abs_zhangs_metric': 0.0,
                     'avg_interestingness': 0.0,
                     'avg_rule_coverage': 0.0,
                     'data_coverage': 0.0,
@@ -354,6 +347,7 @@ if __name__ == "__main__":
                 'avg_support': np.mean([r['avg_support'] for r in runs_with_rules]),
                 'avg_confidence': np.mean([r['avg_confidence'] for r in runs_with_rules]),
                 'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in runs_with_rules]),
+                'avg_abs_zhangs_metric': np.mean([r['avg_abs_zhangs_metric'] for r in runs_with_rules]),
                 'avg_interestingness': np.mean([r['avg_interestingness'] for r in runs_with_rules]),
                 'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in runs_with_rules]),
                 'data_coverage': np.mean([r['data_coverage'] for r in runs_with_rules]),
@@ -367,6 +361,7 @@ if __name__ == "__main__":
                 'avg_support': 0.0,
                 'avg_confidence': 0.0,
                 'avg_zhangs_metric': 0.0,
+                'avg_abs_zhangs_metric': 0.0,
                 'avg_interestingness': 0.0,
                 'avg_rule_coverage': 0.0,
                 'data_coverage': 0.0,
@@ -380,6 +375,7 @@ if __name__ == "__main__":
         print(f"  Support: {avg_result['avg_support']:.4f}")
         print(f"  Confidence: {avg_result['avg_confidence']:.4f}")
         print(f"  Zhang's Metric: {avg_result['avg_zhangs_metric']:.4f}")
+        print(f"  |Zhang's Metric|: {avg_result['avg_abs_zhangs_metric']:.4f}")
         print(f"  Interestingness: {avg_result['avg_interestingness']:.4f}")
         print(f"  Rule Coverage: {avg_result['avg_rule_coverage']:.4f}")
         print(f"  Data Coverage: {avg_result['data_coverage']:.4f}")
@@ -407,7 +403,9 @@ if __name__ == "__main__":
             'ant_similarity': ant_similarity,
             'cons_similarity': cons_similarity,
             'n_ensembles': n_ensembles,
-            'context_size': "full table"
+            'context_size': "full table",
+            'max_workers': max_workers,
+            'query_batch_size': query_batch_size
         }])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
 

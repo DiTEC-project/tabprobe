@@ -70,7 +70,7 @@ def convert_fpgrowth_rules_to_pyaerial_format(rules_df):
     return pyaerial_rules
 
 
-def fpgrowth_rule_learning(dataset, min_support=0.05, min_confidence=0.8, max_len=2):
+def fpgrowth_rule_learning(dataset, min_support=0.05, min_confidence=0.8, max_len=2, compute_stats=True):
     """
     Association rule mining using FP-Growth algorithm.
 
@@ -160,6 +160,17 @@ def fpgrowth_rule_learning(dataset, min_support=0.05, min_confidence=0.8, max_le
     print(f"\n{len(pyaerial_rules)} rules in PyAerial format")
 
     # Calculate average metrics and data coverage
+    if len(pyaerial_rules) > 0 and not compute_stats:
+        return pyaerial_rules, {
+            'rule_count': len(pyaerial_rules),
+            'average_support': 0.0,
+            'average_confidence': 0.0,
+            'average_zhangs_metric': 0.0,
+            'average_interestingness': 0.0,
+            'average_coverage': 0.0,
+            'data_coverage': 0.0
+        }
+
     if len(pyaerial_rules) > 0:
         # Calculate average metrics from rules (metrics already present from mlxtend)
         n_rules = len(pyaerial_rules)
@@ -262,8 +273,7 @@ if __name__ == "__main__":
     # Parameters
     max_len = 2  # Max antecedents (matching other experiments)
     min_confidence = 0.8
-    min_support = 0.3
-    reference_method = "aerial"
+    min_support = 0.2
 
     # Load datasets
     print("\nLoading datasets...")
@@ -327,6 +337,7 @@ if __name__ == "__main__":
             print(f"  Support: {stats.get('average_support', 0):.4f}")
             print(f"  Confidence: {stats.get('average_confidence', 0):.4f}")
             print(f"  Zhang's Metric: {stats.get('average_zhangs_metric', 0):.4f}")
+            print(f"  |Zhang's Metric|: {abs(stats.get('average_zhangs_metric', 0)):.4f}")
             print(f"  Interestingness: {stats.get('average_interestingness', 0):.4f}")
             print(f"  Rule coverage: {stats.get('average_coverage', 0):.4f}")
             print(f"  Data coverage: {stats.get('data_coverage', 0):.4f}")
@@ -338,6 +349,7 @@ if __name__ == "__main__":
                 'avg_support': stats.get('average_support', 0),
                 'avg_confidence': stats.get('average_confidence', 0),
                 'avg_zhangs_metric': stats.get('average_zhangs_metric', 0),
+                'avg_abs_zhangs_metric': abs(stats.get('average_zhangs_metric', 0)),
                 'avg_interestingness': stats.get('average_interestingness', 0),
                 'avg_rule_coverage': stats.get('average_coverage', 0),
                 'data_coverage': stats.get('data_coverage', 0),
@@ -353,6 +365,7 @@ if __name__ == "__main__":
                 'avg_support': 0.0,
                 'avg_confidence': 0.0,
                 'avg_zhangs_metric': 0.0,
+                'avg_abs_zhangs_metric': 0.0,
                 'avg_interestingness': 0.0,
                 'avg_rule_coverage': 0.0,
                 'data_coverage': 0.0,
@@ -376,7 +389,6 @@ if __name__ == "__main__":
             params_df = pd.DataFrame([{
                 'max_antecedents': max_len,
                 'min_confidence': min_confidence,
-                'reference_method': reference_method,
                 'note': 'CPU-based FP-Growth using mlxtend (deterministic, calibrated thresholds)'
             }])
             params_df.to_excel(writer, sheet_name='Parameters', index=False)

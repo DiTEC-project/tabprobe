@@ -1,7 +1,7 @@
 """
-PyAerial Frequent Itemset Mining Experiments
+Aerial Frequent Itemset Mining Experiments
 
-This module runs frequent itemset mining experiments using PyAerial.
+This module runs frequent itemset mining experiments using Aerial.
 """
 import time
 import os

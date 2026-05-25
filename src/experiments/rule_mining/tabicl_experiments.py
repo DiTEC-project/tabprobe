@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import torch
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from tabicl import TabICLClassifier
 
@@ -23,97 +24,78 @@ from src.utils import (
 )
 
 
+def _process_feature_tabicl(feat_info, noisy_context, context_table, query_matrix,
+                             n_queries, n_estimators, random_state, device, query_batch_size):
+    start_idx, end_idx = feat_info['start'], feat_info['end']
+    n_classes = end_idx - start_idx
+
+    x_context = np.delete(noisy_context, range(start_idx, end_idx), axis=1)
+    y_context = np.argmax(context_table[:, start_idx:end_idx], axis=1)
+
+    if len(np.unique(y_context)) < 2:
+        return start_idx, end_idx, np.full((n_queries, n_classes), 1.0 / n_classes)
+
+    model = TabICLClassifier(random_state=random_state, n_estimators=n_estimators, device=device)
+    model.fit(x_context, y_context)
+
+    x_query = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
+    batches = [model.predict_proba(x_query[b:b + query_batch_size])
+               for b in range(0, n_queries, query_batch_size)]
+    probs = np.vstack(batches)
+
+    if probs.shape[1] != n_classes:
+        aligned = np.zeros((n_queries, n_classes))
+        if hasattr(model, 'classes_'):
+            for i, cls in enumerate(model.classes_):
+                if int(cls) < n_classes:
+                    aligned[:, int(cls)] = probs[:, i]
+        else:
+            mc = min(probs.shape[1], n_classes)
+            aligned[:, :mc] = probs[:, :mc]
+        probs = aligned
+
+    return start_idx, end_idx, probs
+
+
 def adapt_tabicl_for_reconstruction(tabicl_model, context_table, query_matrix,
-                                    feature_value_indices, n_samples=None, noise_factor=0.5):
-    """
-    Adapt TabICL for unsupervised rule learning using TabProbe
-
-    Args:
-        tabicl_model: Pretrained TabICL model
-        context_table: The dataset to use as context (n_rows, n_features)
-        query_matrix: Test matrix with antecedent patterns (n_queries, n_features)
-                     Each row has marked features (A) set to 1 in their class position,
-                     and unmarked features (F/A) set to uniform probabilities
-        feature_value_indices: Feature range information
-        n_samples: Number of context samples to use (None = all)
-        noise_factor: Gaussian noise standard deviation to add to context (default=0.5, matching PyAerial)
-
-    Returns:
-        reconstruction_probs: Probability matrix (n_queries, n_features)
-                             For each query, contains predicted probabilities for ALL features,
-                             allowing us to check both antecedent reconstruction and consequent prediction
-    """
-
-    # Limit context size if needed (TabICL has context length limits)
+                                    feature_value_indices, n_samples=None, noise_factor=0.5,
+                                    max_workers=1, query_batch_size=512):
     if n_samples and len(context_table) > n_samples:
         context_table = context_table[:n_samples]
 
-    # Add Gaussian noise to context table, matching PyAerial's training approach
-    # This makes TabICL see values between 0 and 1 (not just one-hot 0s and 1s),
-    # which makes query patterns with equal probabilities [0.5, 0.5] more natural
-    print(f"    Adding Gaussian noise (factor={noise_factor}) to context...")
     noisy_context = add_gaussian_noise(context_table, noise_factor=noise_factor)
-
     n_queries = query_matrix.shape[0]
     n_features_total = query_matrix.shape[1]
-
-    # Initialize reconstruction matrix - will contain ALL feature predictions for ALL queries
     reconstruction_probs = np.zeros((n_queries, n_features_total))
 
-    # For each feature, train TabICL to predict it and reconstruct for ALL queries
-    print(f"    Reconstructing all features for {n_queries} queries...")
-    print(f"    Training {len(feature_value_indices)} feature predictors...")
+    n_estimators = getattr(tabicl_model, 'n_estimators', 8)
+    random_state = getattr(tabicl_model, 'random_state', 42)
+    device = getattr(tabicl_model, 'device', 'cuda' if torch.cuda.is_available() else 'cpu')
 
-    for feat_idx, feat_info in enumerate(feature_value_indices):
-        start_idx = feat_info['start']
-        end_idx = feat_info['end']
-        n_classes = end_idx - start_idx
+    print(f"    Reconstructing {len(feature_value_indices)} features for {n_queries} queries "
+          f"(workers={max_workers}, batch_size={query_batch_size})...")
 
-        print(f"        Feature {feat_idx}: classes={n_classes}, range=[{start_idx}:{end_idx}]")
+    shared = (noisy_context, context_table, query_matrix, n_queries,
+              n_estimators, random_state, device, query_batch_size)
 
-        # Prepare context: X = all OTHER features (excluding target), y = current feature
-        # This properly teaches TabICL: given all other features, predict this feature
-        # This avoids data leakage and matches autoencoder reconstruction behavior
-        # Use noisy_context to match PyAerial's training with noise
-        x_context = np.delete(noisy_context, range(start_idx, end_idx), axis=1)
-        y_context_onehot = context_table[:, start_idx:end_idx]  # Target is clean (no noise)
-        y_context = np.argmax(y_context_onehot, axis=1)
-
-        # Fit TabICL to predict this feature from all OTHER features
-        tabicl_model.fit(x_context, y_context)
-
-        # Prepare query matrix: remove the target feature columns from query
-        # We must match the training input shape (context without target feature)
-        # However, we want to keep OTHER marked features (antecedents) in the query
-        x_query = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
-
-        if hasattr(tabicl_model, 'predict_proba'):
-            probs = tabicl_model.predict_proba(x_query)
-            # probs shape: (n_queries, n_classes_seen_in_training)
-            # May not match n_classes if some classes weren't in context
-
-            if probs.shape[1] != n_classes:
-                print(f"        WARNING: predict_proba returned {probs.shape[1]} classes, expected {n_classes}")
-                # Create proper sized array and fill with available probabilities
-                proper_probs = np.zeros((n_queries, n_classes))
-                # Get the classes TabICL actually learned
-                if hasattr(tabicl_model, 'classes_'):
-                    for i, cls in enumerate(tabicl_model.classes_):
-                        if cls < n_classes:
-                            proper_probs[:, cls] = probs[:, i]
-                else:
-                    # Assume sequential classes starting from 0
-                    min_cols = min(probs.shape[1], n_classes)
-                    proper_probs[:, :min_cols] = probs[:, :min_cols]
-                reconstruction_probs[:, start_idx:end_idx] = proper_probs
-            else:
-                reconstruction_probs[:, start_idx:end_idx] = probs
+    if max_workers > 1:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_process_feature_tabicl, fi, *shared): fi
+                       for fi in feature_value_indices}
+            for future in as_completed(futures):
+                s, e, probs = future.result()
+                reconstruction_probs[:, s:e] = probs
+    else:
+        for fi in feature_value_indices:
+            s, e, probs = _process_feature_tabicl(fi, *shared)
+            reconstruction_probs[:, s:e] = probs
 
     return reconstruction_probs
 
 
 def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
-                         ant_similarity=0.5, cons_similarity=0.8, random_state=42, n_estimators=8):
+                         ant_similarity=0.5, cons_similarity=0.8, random_state=42, n_estimators=8,
+                         max_workers=1, query_batch_size=512):
     """
     End-to-end unsupervised rule learning using TabICL.
 
@@ -160,7 +142,9 @@ def tabicl_rule_learning(dataset, max_antecedents=2, context_samples=100,
         context_table=encoded_data,
         query_matrix=test_matrix,
         feature_value_indices=feature_value_indices,
-        n_samples=context_samples
+        n_samples=context_samples,
+        max_workers=max_workers,
+        query_batch_size=query_batch_size
     )
 
     print(f"Reconstruction shape: {reconstruction_probs.shape}")
@@ -195,6 +179,8 @@ if __name__ == "__main__":
     cons_similarity = 0.8
     context_samples = None
     base_seed = 42  # Base seed for reproducibility
+    max_workers = 4
+    query_batch_size = 4096
 
     # Generate seed sequence for all runs
     print(f"\nGenerating seed sequence from base_seed={base_seed}...")
@@ -246,7 +232,9 @@ if __name__ == "__main__":
                 context_samples=context_samples if context_samples else dataset.shape[0],
                 ant_similarity=ant_similarity,
                 cons_similarity=cons_similarity,
-                random_state=run_seed  # Pass seed to TabICL for reproducibility
+                random_state=run_seed,
+                max_workers=max_workers,
+                query_batch_size=query_batch_size
             )
 
             end_time = time.time()
@@ -286,6 +274,7 @@ if __name__ == "__main__":
                 print(f"  Support: {avg_metrics['support']:.4f}")
                 print(f"  Confidence: {avg_metrics['confidence']:.4f}")
                 print(f"  Zhang's Metric: {avg_metrics['zhangs_metric']:.4f}")
+                print(f"  |Zhang's Metric|: {abs(avg_metrics['zhangs_metric']):.4f}")
 
                 # Store results for this run
                 result = {
@@ -296,6 +285,7 @@ if __name__ == "__main__":
                     'avg_support': avg_metrics['support'],
                     'avg_confidence': avg_metrics['confidence'],
                     'avg_zhangs_metric': avg_metrics['zhangs_metric'],
+                    'avg_abs_zhangs_metric': abs(avg_metrics['zhangs_metric']),
                     'avg_interestingness': avg_metrics['interestingness'],
                     'avg_rule_coverage': avg_metrics['rule_coverage'],
                     'data_coverage': avg_metrics['data_coverage'],
@@ -312,6 +302,7 @@ if __name__ == "__main__":
                     'avg_support': 0.0,
                     'avg_confidence': 0.0,
                     'avg_zhangs_metric': 0.0,
+                    'avg_abs_zhangs_metric': 0.0,
                     'avg_interestingness': 0.0,
                     'avg_rule_coverage': 0.0,
                     'data_coverage': 0.0,
@@ -334,6 +325,7 @@ if __name__ == "__main__":
                 'avg_support': np.mean([r['avg_support'] for r in runs_with_rules]),
                 'avg_confidence': np.mean([r['avg_confidence'] for r in runs_with_rules]),
                 'avg_zhangs_metric': np.mean([r['avg_zhangs_metric'] for r in runs_with_rules]),
+                'avg_abs_zhangs_metric': np.mean([r['avg_abs_zhangs_metric'] for r in runs_with_rules]),
                 'avg_interestingness': np.mean([r['avg_interestingness'] for r in runs_with_rules]),
                 'avg_rule_coverage': np.mean([r['avg_rule_coverage'] for r in runs_with_rules]),
                 'data_coverage': np.mean([r['data_coverage'] for r in runs_with_rules]),
@@ -347,6 +339,7 @@ if __name__ == "__main__":
                 'avg_support': 0.0,
                 'avg_confidence': 0.0,
                 'avg_zhangs_metric': 0.0,
+                'avg_abs_zhangs_metric': 0.0,
                 'avg_interestingness': 0.0,
                 'avg_rule_coverage': 0.0,
                 'data_coverage': 0.0,
@@ -360,6 +353,7 @@ if __name__ == "__main__":
         print(f"  Support: {avg_result['avg_support']:.4f}")
         print(f"  Confidence: {avg_result['avg_confidence']:.4f}")
         print(f"  Zhang's Metric: {avg_result['avg_zhangs_metric']:.4f}")
+        print(f"  |Zhang's Metric|: {avg_result['avg_abs_zhangs_metric']:.4f}")
         print(f"  Interestingness: {avg_result['avg_interestingness']:.4f}")
         print(f"  Rule Coverage: {avg_result['avg_rule_coverage']:.4f}")
         print(f"  Data Coverage: {avg_result['data_coverage']:.4f}")
@@ -385,7 +379,9 @@ if __name__ == "__main__":
             'base_seed': base_seed,
             'max_antecedents': max_antecedents,
             'ant_similarity': ant_similarity,
-            'cons_similarity': cons_similarity
+            'cons_similarity': cons_similarity,
+            'max_workers': max_workers,
+            'query_batch_size': query_batch_size
         }])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
 

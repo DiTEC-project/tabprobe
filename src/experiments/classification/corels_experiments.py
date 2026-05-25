@@ -1,4 +1,7 @@
-#!/usr/bin/env python
+# This script runs CORELS experiments
+# CORELS accepts a set of frequent itemsets and then creates a rule based classifier
+# The source code of CORELS can found under the src/experiments/classification/corels folder and it is
+# adapted from https://github.com/corels/corels
 import time
 import os
 import json
@@ -651,7 +654,9 @@ if __name__ == "__main__":
     }
 
     # Methods to run (all available methods by default)
-    methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.1']
+    # methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.2', 'fpgrowth_0.1', 'fpgrowth_0.05',
+    #            'fpgrowth_0.01']
+    methods = ['tabpfn', 'tabicl', 'tabdpt']
     n_runs = 10
     base_seed = 42
     n_folds = 5
@@ -663,7 +668,7 @@ if __name__ == "__main__":
         print(f"  {method}: {hyperparams[method]}")
 
     # Load all datasets by default
-    datasets = get_ucimlrepo_datasets(size="small")
+    datasets = get_ucimlrepo_datasets()
     all_datasets = datasets
 
     os.makedirs("out", exist_ok=True)

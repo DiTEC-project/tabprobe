@@ -1,3 +1,7 @@
+# This script runs CBA on a set of methods defined in the main function
+# CBA accepts association rules as input and builds a rule based classifier
+# The results are saved into an excel file
+
 import time
 import os
 import json
@@ -242,7 +246,9 @@ def mine_rules_for_method(method, train_data, hyperparams):
             context_samples=hyperparams.get('context_samples', None),
             ant_similarity=hyperparams['ant_similarity'],
             cons_similarity=hyperparams['cons_similarity'],
-            n_estimators=hyperparams['n_estimators']
+            n_estimators=hyperparams['n_estimators'],
+            max_workers=hyperparams.get('max_workers', 4),
+            query_batch_size=hyperparams.get('query_batch_size', 512)
         )
         rules, _ = calculate_rule_metrics(
             rules=rules,
@@ -257,6 +263,8 @@ def mine_rules_for_method(method, train_data, hyperparams):
             ant_similarity=hyperparams['ant_similarity'],
             cons_similarity=hyperparams['cons_similarity'],
             n_estimators=hyperparams['n_estimators'],
+            max_workers=hyperparams.get('max_workers', 4),
+            query_batch_size=hyperparams.get('query_batch_size', 512)
         )
         rules, _ = calculate_rule_metrics(
             rules=rules,
@@ -271,7 +279,9 @@ def mine_rules_for_method(method, train_data, hyperparams):
                 max_antecedents=hyperparams['max_antecedents'],
                 ant_similarity=hyperparams['ant_similarity'],
                 cons_similarity=hyperparams['cons_similarity'],
-                n_ensembles=hyperparams['n_ensembles']
+                n_ensembles=hyperparams['n_ensembles'],
+                max_workers=hyperparams.get('max_workers', 4),
+                query_batch_size=hyperparams.get('query_batch_size', 512)
             )
         rules, _ = calculate_rule_metrics(
             rules=rules,
@@ -445,13 +455,15 @@ if __name__ == "__main__":
     # Hyperparameters for each method
     # context_samples = None means use the entire table
     hyperparams = {
-        'aerial': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8},
-        'tabpfn': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8,
-                   'context_samples': None, 'n_estimators': 8},
-        'tabicl': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8,
-                   'context_samples': None, 'n_estimators': 8},
-        'tabdpt': {'max_antecedents': 2, 'ant_similarity': 0.01, 'cons_similarity': 0.8,
-                   'n_ensembles': 8},
+        'aerial': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8},
+        'tabpfn': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8,
+                   'context_samples': None, 'n_estimators': 8,
+                   'max_workers': 4, 'query_batch_size': 4096},
+        'tabicl': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8,
+                   'context_samples': None, 'n_estimators': 8,
+                   'max_workers': 4, 'query_batch_size': 4096},
+        'tabdpt': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8,
+                   'n_ensembles': 8, 'max_workers': 4, 'query_batch_size': 4096},
         'fpgrowth_0.5': {'max_antecedents': 2, 'min_support': 0.5, 'min_confidence': 0.8},
         'fpgrowth_0.3': {'max_antecedents': 2, 'min_support': 0.3, 'min_confidence': 0.8},
         'fpgrowth_0.2': {'max_antecedents': 2, 'min_support': 0.2, 'min_confidence': 0.8},
@@ -460,8 +472,25 @@ if __name__ == "__main__":
         'fpgrowth_0.01': {'max_antecedents': 2, 'min_support': 0.01, 'min_confidence': 0.8},
     }
 
+    ant_similarity_overrides = {
+        'breast_cancer': {
+            'aerial': 0.1,
+            'tabdpt': 0.1,
+            'tabpfn': 0.01,
+            'tabicl': 0.01,
+        },
+        'cervical_cancer_behavior_risk': {
+            'aerial': 0.1,
+            'tabpfn': 0.1,
+            'tabicl': 0.1,
+            'tabdpt': 0.1,
+        },
+    }
+
     # Methods to run (all available methods by default)
-    methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.1']
+    # methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.2', 'fpgrowth_0.1', 'fpgrowth_0.05',
+    #            'fpgrowth_0.01']
+    methods = ['tabpfn', 'tabicl']
     n_runs = 10
     base_seed = 42
     n_folds = 5
@@ -473,8 +502,8 @@ if __name__ == "__main__":
         print(f"  {method}: {hyperparams[method]}")
 
     # Load all datasets by default
-    dataset_size = "small"
-    datasets = get_ucimlrepo_datasets(size=dataset_size)
+    dataset_size = "normal"
+    datasets = get_ucimlrepo_datasets(size=dataset_size, names=["breast_cancer"])
     all_datasets = datasets
 
     os.makedirs("out", exist_ok=True)
@@ -501,7 +530,11 @@ if __name__ == "__main__":
                 print(f"  Using Aerial dataset-specific params: batch_size={aerial_params['batch_size']}, "
                       f"layer_dims={aerial_params['layer_dims']}, epochs={aerial_params['epochs']}")
             else:
-                current_hyperparams = hyperparams[method]
+                current_hyperparams = hyperparams[method].copy()
+
+            if dataset_name in ant_similarity_overrides and method in ant_similarity_overrides[dataset_name]:
+                current_hyperparams['ant_similarity'] = ant_similarity_overrides[dataset_name][method]
+                print(f"  ant_similarity override: {current_hyperparams['ant_similarity']}")
 
             dataset_runs = []
 
