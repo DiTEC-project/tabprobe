@@ -1,4 +1,4 @@
-# Association Rule Learning with Tabular Foundation Models
+# TabProbe: Model-Agnostic Association Rule Learning with Tabular Foundation Models
 
 This repository contains the experimental source code for the paper 
 **"Model-Agnostic Association Rule Learning with Tabular Foundation Models"**, TabProbe algorithm (Algorithm 2 in the paper) and the baselines.
