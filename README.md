@@ -1,13 +1,14 @@
 # Association Rule Learning with Tabular Foundation Models
 
-This repository contains the experimental source code for the paper **"Model-Agnostic Association Rule Learning via Conditional Probability Estimation"**, TabProbe algorithm (Algorithm 2 in the paper) and the baselines.
+This repository contains the experimental source code for the paper 
+**"Model-Agnostic Association Rule Learning with Tabular Foundation Models"**, TabProbe algorithm (Algorithm 2 in the paper) and the baselines.
 
 In addition, it provides a reusable Python
 wrapper that enables researchers and practitioners to mine association rules
 from tabular foundation models without having to reproduce the full experimental pipeline.
 
 The tabular foundation models supported both in the experiments and in the wrapper library are
-**TabPFNv2.5** [1], **TabICL** [2], and **TabDPT** [3].
+**TabPFN** [1], **TabICL** [2], and **TabDPT** [3].
 
 **Table of Contents**
 
@@ -25,7 +26,7 @@ and baselines used in the experiments.
 
 ```
 ├── src/
-│   ├── wrapper/                     # Reusable rule learning library from TFMs (TabPFNv2.5, TabICL, and TabDPT)
+│   ├── wrapper/                     # Reusable rule learning library from TFMs (TabPFNv3, TabICLv2, and TabDPT)
 │   │   ├── __init__.py
 │   │   └── tabprobe.py              # TabProbe: unified interface for all TFMs
 │   ├── experiments/
@@ -34,13 +35,16 @@ and baselines used in the experiments.
 │   │   │   ├── tabicl_experiments.py
 │   │   │   ├── tabdpt_experiments.py
 │   │   │   ├── aerial_experiments.py
-│   │   │   └── fpgrowth_experiments.py
+│   │   │   ├── fpgrowth_experiments.py
+│   │   │   ├── xgboost_experiments.py
+│   │   │   └── tune_xgboost.py         # Optuna-based hyperparameter tuning for XGBoost
 │   │   ├── itemset_mining/             # Frequent itemset mining (required for running CORELS)
 │   │   ├── classification/             # CBA and CORELS classification experiments
 │   │   │   ├── cba_experiments.py
 │   │   │   └── corels_experiments.py
 │   │   ├── scalability_experiments.py  # Scalability experiments
-│   │   └── hyperparameter_analysis.py  # Hyper-parameter analysis experiment
+│   │   ├── hyperparameter_analysis.py  # Hyper-parameter analysis experiment
+│   │   └── xgboost_best_parameters.json  # Tuned XGBoost parameters per dataset
 │   └── utils/                          # Shared utilities
 │       ├── data_loading.py             # UCI ML repo data loading
 │       ├── data_prep.py                # Data encoding
@@ -49,9 +53,10 @@ and baselines used in the experiments.
 │       ├── rule_extraction.py          # Rule extraction from reconstructions
 │       ├── rule_quality.py             # Rule quality metrics
 │       ├── rule_saving.py              # Store learned rules into files
-│       ├── seed_utils.py               # Random seed utilities for reproducibility
-│       └── rule_quality.py             # Quality metrics
-├── requirements.txt                    # Project requirements
+│       └── seed_utils.py               # Random seed utilities for reproducibility
+├── run_experiment.sh                   # SLURM job script for running experiments on GPU clusters
+├── setup_environment.sh                # SLURM script for setting up the conda environment
+└── requirements.txt                    # Project requirements
 ```
 
 ### Datasets
@@ -82,12 +87,14 @@ average maximal itemset size of 4.
 ### Tabular foundation models and baselines
 
 3 tabular foundation
-models ([TabPFNv2.5](https://github.com/PriorLabs/TabPFN) [1], [TabICL](https://github.com/soda-inria/tabicl) [2],
+models ([TabPFNv3](https://github.com/PriorLabs/TabPFN) [1], [TabICLv2](https://github.com/soda-inria/tabicl) [2],
 and [TabDPT](https://github.com/layer6ai-labs/TabDPT-inference) [3]),
-Aerial+ [9] and FP-Growth [5] are used in the experiments. Please follow the hyperlinks to access detailed instructions
+Aerial+ [9], FP-Growth [5], and XGBoost [12] are used in the experiments. Please follow the hyperlinks to access detailed instructions
 on installations of individual tabular foundation models. Aerial+ is implemented
 with PyAerial [10] and FP-Growth
 is implemented with [Mlxtend](https://rasbt.github.io/mlxtend/user_guide/frequent_patterns/fpgrowth/) [11].
+XGBoost applies the same conditional probability estimation pipeline as the tabular foundation models,
+using gradient-boosted trees trained per feature. Hyperparameters are tuned per dataset with Optuna [13].
 
 In downstream classification experiments, CORELS [8] is implemented following its original
 code [repository](https://github.com/corels/corels), and CBA [7] is implemented
@@ -126,16 +133,16 @@ pip install --group dev
 All experiments run on the small datasets by default. Update the call
 
 ```
+.get_ucimlrepo_datasets(size="small")
+```
+
+in each individual experiment file to
+
+```
 get_ucimlrepo_datasets(size="normal")
 ```
 
-in each individual experiment files to
-
-```
-get_ucimlrepo_datasets(size="normal")
-```
-
-to be able run the experiments on larger datasets as well.
+to run the experiments on larger datasets as well.
 
 Experiments can be run easily as follows:
 
@@ -146,6 +153,7 @@ python src/experiments/rule_mining/tabicl_experiments.py
 python src/experiments/rule_mining/tabdpt_experiments.py
 python src/experiments/rule_mining/aerial_experiments.py
 python src/experiments/rule_mining/fpgrowth_experiments.py
+python src/experiments/rule_mining/xgboost_experiments.py
 
 # Classification experiments
 python src/experiments/classification/cba_experiments.py
@@ -154,6 +162,27 @@ python src/experiments/classification/corels_experiments.py
 # Scalability and hyperparameter analysis
 python src/experiments/scalability_experiments.py
 python src/experiments/hyperparameter_analysis.py
+```
+
+XGBoost hyperparameters can be tuned per dataset before running the experiments:
+
+```bash
+python src/experiments/rule_mining/tune_xgboost.py
+```
+
+This runs 50 Optuna trials per dataset and saves the best parameters to
+`src/experiments/xgboost_best_parameters.json`, which is automatically picked up by
+`xgboost_experiments.py` at runtime.
+
+**Running on GPU clusters**
+
+For HPC environments with SLURM, `setup_environment.sh` can be used to create the conda
+environment on the cluster, and `run_experiment.sh` can be used to submit individual
+experiment scripts as SLURM jobs:
+
+```bash
+sbatch setup_environment.sh
+sbatch run_experiment.sh src/experiments/rule_mining/xgboost_experiments.py
 ```
 
 **4. Accessing the experimental results**
@@ -267,8 +296,7 @@ TabProbe(
 
 ## References
 
-1. Grinsztajn, Léo, et al. "TabPFN-2.5: Advancing the state of the art in tabular foundation models." arXiv preprint
-   arXiv:2511.08667 (2025).
+1. Grinsztajn, Léo, et al. "TabPFN-3: Technical Report." arXiv preprint arXiv:2605.13986 (2026).
 2. Qu, Jingang, et al. "Tabicl: A tabular foundation model for in-context learning on large data." arXiv preprint arXiv:
    2502.05564 (2025).
 3. Ma, Junwei, et al. "Tabdpt: Scaling tabular foundation models." arXiv preprint arXiv:2410.18164 (2024).
