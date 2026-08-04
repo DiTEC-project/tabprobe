@@ -164,6 +164,20 @@ python src/experiments/scalability_experiments.py
 python src/experiments/hyperparameter_analysis.py
 ```
 
+**Statistical significance analysis**
+
+[`statistical_analysis.py`](src/experiments/rule_mining/statistical_analysis.py) compares method ranks across
+the 10 datasets for each rule-mining metric. It reads the `Average Results` sheet from
+`ARM with TFMs.xlsx` in the repository root, applies a Friedman test at `alpha = 0.05`, and runs the
+post-hoc Nemenyi test when the Friedman test is significant.
+
+```bash
+python src/experiments/rule_mining/statistical_analysis.py
+```
+
+The generated summary, normalized inputs, average ranks, and pairwise Nemenyi p-values are saved in
+`statistical_analysis_results/`.
+
 XGBoost hyperparameters can be tuned per dataset before running the experiments:
 
 ```bash
