@@ -169,7 +169,8 @@ python src/experiments/hyperparameter_analysis.py
 [`statistical_analysis.py`](src/experiments/rule_mining/statistical_analysis.py) compares method ranks across
 the 10 datasets for each rule-mining metric. It reads the `Average Results` sheet from
 `ARM with TFMs.xlsx` in the repository root, applies a Friedman test at `alpha = 0.05`, and runs the
-post-hoc Nemenyi test when the Friedman test is significant.
+post-hoc Nemenyi test and pairwise Wilcoxon signed-rank tests when the Friedman test is significant.
+Wilcoxon p-values are adjusted across method pairs within each metric using Holm's method.
 
 ```bash
 python src/experiments/rule_mining/statistical_analysis.py

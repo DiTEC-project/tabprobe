@@ -4,7 +4,7 @@ import numpy as np
 import openpyxl
 import pandas as pd
 import scikit_posthocs as sp
-from scipy.stats import friedmanchisquare
+from scipy.stats import friedmanchisquare, wilcoxon
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -63,6 +63,16 @@ def read_block(sheet, start_col: int) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["algorithm", *headers[1:]])
 
 
+def holm_adjust(p_values: list[float]) -> np.ndarray:
+    """Return Holm-adjusted p-values while preserving the original order."""
+    values = np.asarray(p_values, dtype=float)
+    order = np.argsort(values)
+    adjusted_sorted = np.maximum.accumulate((len(values) - np.arange(len(values))) * values[order])
+    adjusted = np.empty_like(values)
+    adjusted[order] = np.minimum(adjusted_sorted, 1.0)
+    return adjusted
+
+
 def main() -> None:
     workbook = openpyxl.load_workbook(INPUT, data_only=True, read_only=False)
     sheet = workbook[SHEET]
@@ -86,7 +96,8 @@ def main() -> None:
 
     omnibus_rows = []
     rank_rows = []
-    significant_pairs = []
+    nemenyi_significant_pairs = []
+    wilcoxon_all_pairs = []
 
     for metric in METRICS:
         wide = data.pivot(index="dataset", columns="algorithm", values=metric).loc[DATASETS, METHODS]
@@ -124,7 +135,7 @@ def main() -> None:
                 for method_b in METHODS[i + 1 :]:
                     pair_p = float(nemenyi.loc[method_a, method_b])
                     if pair_p < ALPHA:
-                        significant_pairs.append(
+                        nemenyi_significant_pairs.append(
                             {
                                 "metric": metric,
                                 "method_a": method_a,
@@ -137,10 +148,51 @@ def main() -> None:
                             }
                         )
 
+            metric_wilcoxon_pairs = []
+            for i, method_a in enumerate(METHODS):
+                for method_b in METHODS[i + 1 :]:
+                    values_a = wide[method_a].to_numpy()
+                    values_b = wide[method_b].to_numpy()
+                    differences = values_a - values_b
+                    nonzero_pairs = int(np.count_nonzero(differences))
+                    if nonzero_pairs == 0:
+                        signed_rank_statistic, raw_p_value = 0.0, 1.0
+                    else:
+                        result = wilcoxon(
+                            values_a,
+                            values_b,
+                            alternative="two-sided",
+                            zero_method="wilcox",
+                            method="auto",
+                        )
+                        signed_rank_statistic = float(result.statistic)
+                        raw_p_value = float(result.pvalue)
+                    metric_wilcoxon_pairs.append(
+                        {
+                            "metric": metric,
+                            "method_a": method_a,
+                            "method_b": method_b,
+                            "wilcoxon_statistic": signed_rank_statistic,
+                            "raw_p_value": raw_p_value,
+                            "median_difference_a_minus_b": float(np.median(differences)),
+                            "method_a_higher_count": int(np.sum(differences > 0)),
+                            "method_b_higher_count": int(np.sum(differences < 0)),
+                            "tied_count": int(np.sum(differences == 0)),
+                            "nonzero_pairs": nonzero_pairs,
+                        }
+                    )
+
+            adjusted_p_values = holm_adjust([row["raw_p_value"] for row in metric_wilcoxon_pairs])
+            for row, adjusted_p_value in zip(metric_wilcoxon_pairs, adjusted_p_values):
+                row["holm_adjusted_p_value"] = float(adjusted_p_value)
+                row["alpha"] = ALPHA
+                row["reject_after_holm"] = bool(adjusted_p_value < ALPHA)
+            wilcoxon_all_pairs.extend(metric_wilcoxon_pairs)
+
     omnibus = pd.DataFrame(omnibus_rows)
     average_ranks = pd.DataFrame(rank_rows)
-    pairs = pd.DataFrame(
-        significant_pairs,
+    nemenyi_pairs = pd.DataFrame(
+        nemenyi_significant_pairs,
         columns=[
             "metric",
             "method_a",
@@ -152,17 +204,23 @@ def main() -> None:
             "alpha",
         ],
     )
+    wilcoxon_pairs = pd.DataFrame(wilcoxon_all_pairs)
+    wilcoxon_significant_pairs = wilcoxon_pairs.loc[wilcoxon_pairs["reject_after_holm"]].copy()
     omnibus.to_csv(OUTPUT_DIR / "friedman_results.csv", index=False)
     average_ranks.to_csv(OUTPUT_DIR / "average_ranks.csv", index=False)
-    pairs.to_csv(OUTPUT_DIR / "nemenyi_significant_pairs.csv", index=False)
+    nemenyi_pairs.to_csv(OUTPUT_DIR / "nemenyi_significant_pairs.csv", index=False)
+    wilcoxon_pairs.to_csv(OUTPUT_DIR / "wilcoxon_signed_rank_all_pairs.csv", index=False)
+    wilcoxon_significant_pairs.to_csv(OUTPUT_DIR / "wilcoxon_signed_rank_significant_pairs.csv", index=False)
 
     lines = [
-        "# Friedman and Nemenyi analysis",
+        "# Friedman, Nemenyi, and Wilcoxon signed-rank analysis",
         "",
         f"Source: `{INPUT.name}`, sheet `{SHEET}`.",
         f"Design: {len(DATASETS)} datasets (blocks) × {len(METHODS)} methods; alpha = {ALPHA} per metric.",
         "Rank 1 denotes the highest observed value (descriptive, not necessarily best).",
-        "Nemenyi tests are performed only when the corresponding Friedman test rejects equal ranks.",
+        "Nemenyi and pairwise two-sided Wilcoxon signed-rank tests are performed only when the corresponding "
+        "Friedman test rejects equal ranks.",
+        "Wilcoxon p-values are adjusted across the 36 method pairs within each metric using Holm's method.",
         "",
         "## Friedman tests",
         "",
@@ -170,7 +228,13 @@ def main() -> None:
         "",
         "## Significant Nemenyi pairs",
         "",
-        pairs.to_markdown(index=False, floatfmt=".6g") if not pairs.empty else "No significant pairs.",
+        nemenyi_pairs.to_markdown(index=False, floatfmt=".6g") if not nemenyi_pairs.empty else "No significant pairs.",
+        "",
+        "## Significant Wilcoxon signed-rank pairs after Holm correction",
+        "",
+        wilcoxon_significant_pairs.to_markdown(index=False, floatfmt=".6g")
+        if not wilcoxon_significant_pairs.empty
+        else "No significant pairs.",
         "",
         "## Average ranks",
         "",
@@ -183,7 +247,9 @@ def main() -> None:
 
     print(omnibus.to_string(index=False))
     print("\nSignificant Nemenyi pairs:")
-    print(pairs.to_string(index=False) if not pairs.empty else "None")
+    print(nemenyi_pairs.to_string(index=False) if not nemenyi_pairs.empty else "None")
+    print("\nSignificant Wilcoxon signed-rank pairs after Holm correction:")
+    print(wilcoxon_significant_pairs.to_string(index=False) if not wilcoxon_significant_pairs.empty else "None")
 
 
 if __name__ == "__main__":
