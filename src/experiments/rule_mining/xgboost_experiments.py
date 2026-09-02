@@ -11,10 +11,12 @@ from datetime import datetime
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from xgboost import XGBClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.model_selection import StratifiedKFold
+from scipy.optimize import minimize_scalar
 
 from src.utils.data_prep import prepare_categorical_data
-from src.utils.test_matrix import generate_test_matrix
-from src.utils.rule_extraction import extract_rules_from_reconstruction
+from src.utils.probing import probe_and_extract_rules
 from src.utils import (
     get_ucimlrepo_datasets,
     calculate_rule_metrics,
@@ -23,6 +25,7 @@ from src.utils import (
     save_rules,
     convert_metrics_to_stats,
 )
+from src.utils.data_loading import UCIMLREPO_SMALL_DATASETS
 
 try:
     import torch as _torch
@@ -31,10 +34,70 @@ try:
 except ImportError:
     _CUDA_AVAILABLE = False
 
+# Datasets diagnosed as XGBoost reliability outliers where cross-fitted
+# calibration was actually shown to help (see calibration_diagnostics.py). Isotonic
+# regression is used on 'normal'-sized datasets (enough rows to avoid isotonic's
+# small-sample collapse into a hard 0/1 classifier, which is confirmed on acute_inflammations,
+# which is why it's excluded here), and the smaller 'fertility' keeps sigmoid/Platt scaling.
+CALIBRATE_DATASETS = {'fertility', 'mushroom', 'spambase', 'breast_cancer'}
+
+
+def _resolve_calibration(dataset_name):
+    """XGBoost's per-dataset calibration policy: (calibrate, calibration_method)."""
+    if dataset_name not in CALIBRATE_DATASETS:
+        return False, 'sigmoid'
+    method = 'sigmoid' if dataset_name in UCIMLREPO_SMALL_DATASETS else 'isotonic'
+    return True, method
+
+
+_TEMPERATURE_BOUNDS = (0.05, 20.0)
+
+
+def _fit_temperature(margins, y_true):
+    """1-D temperature scaling: find T minimizing NLL of the temperature-scaled margins.
+
+    margins is (n,) raw XGBoost margins for binary:logistic, or (n, n_classes) for
+    multi:softmax/softprob -- XGBClassifier.predict(..., output_margin=True) returns
+    whichever shape matches the objective it auto-selected for this feature.
+    """
+
+    def nll(t):
+        return _temperature_nll(margins, y_true, t)
+
+    result = minimize_scalar(nll, bounds=_TEMPERATURE_BOUNDS, method='bounded')
+    return float(result.x)
+
+
+def _temperature_nll(margins, y_true, t):
+    if margins.ndim == 1:
+        z = np.clip(margins / t, -30, 30)
+        p = 1.0 / (1.0 + np.exp(-z))
+        p = np.clip(p, 1e-12, 1 - 1e-12)
+        return -np.mean(y_true * np.log(p) + (1 - y_true) * np.log(1 - p))
+    z = margins / t
+    z = z - z.max(axis=1, keepdims=True)
+    exp_z = np.exp(z)
+    p = exp_z / exp_z.sum(axis=1, keepdims=True)
+    p = np.clip(p[np.arange(len(y_true)), y_true], 1e-12, 1.0)
+    return -np.mean(np.log(p))
+
+
+def _apply_temperature(margins, temperature):
+    """Raw XGBoost margins -> a full (n, n_classes) probability matrix, temperature-scaled."""
+    if margins.ndim == 1:
+        z = np.clip(margins / temperature, -30, 30)
+        p_pos = 1.0 / (1.0 + np.exp(-z))
+        return np.stack([1 - p_pos, p_pos], axis=1)
+    z = margins / temperature
+    z = z - z.max(axis=1, keepdims=True)
+    exp_z = np.exp(z)
+    return exp_z / exp_z.sum(axis=1, keepdims=True)
+
 
 def _process_feature_xgb(feat_info, context_table, query_matrix,
                          n_queries, n_estimators, max_depth, learning_rate,
-                         random_state, query_batch_size, device):
+                         random_state, query_batch_size, device,
+                         calibrate=False, calibration_cv=5, calibration_method='sigmoid'):
     start_idx, end_idx = feat_info['start'], feat_info['end']
     n_classes = end_idx - start_idx
 
@@ -44,25 +107,69 @@ def _process_feature_xgb(feat_info, context_table, query_matrix,
     if len(np.unique(y_context)) < 2:
         return start_idx, end_idx, np.full((n_queries, n_classes), 1.0 / n_classes)
 
-    model = XGBClassifier(
-        n_estimators=n_estimators,
-        max_depth=max_depth,
-        learning_rate=learning_rate,
-        random_state=random_state,
-        verbosity=0,
-        eval_metric='mlogloss',
-        device=device,
-    )
-    model.fit(x_context, y_context)
+    def make_model():
+        return XGBClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            random_state=random_state,
+            verbosity=0,
+            eval_metric='mlogloss',
+            device=device,
+        )
 
     x_query = np.delete(query_matrix, range(start_idx, end_idx), axis=1)
-    batches = [model.predict_proba(x_query[b:b + query_batch_size])
-               for b in range(0, n_queries, query_batch_size)]
-    probs = np.vstack(batches)
+    min_class_count = int(np.unique(y_context, return_counts=True)[1].min())
+    can_calibrate = calibrate and min_class_count >= 2
+
+    use_temperature = False
+    if can_calibrate and calibration_method == 'temperature':
+        cv = min(calibration_cv, min_class_count)
+        skf = StratifiedKFold(n_splits=cv, shuffle=False)
+        oof_margins = None
+        for train_idx, val_idx in skf.split(x_context, y_context):
+            fold_model = make_model()
+            fold_model.fit(x_context[train_idx], y_context[train_idx])
+            fold_margins = fold_model.predict(x_context[val_idx], output_margin=True)
+            if oof_margins is None:
+                shape = (len(y_context),) if fold_margins.ndim == 1 else (len(y_context), fold_margins.shape[1])
+                oof_margins = np.zeros(shape)
+            oof_margins[val_idx] = fold_margins
+        temperature = _fit_temperature(oof_margins, y_context)
+
+        lo, hi = _TEMPERATURE_BOUNDS
+        use_temperature = lo * 1.05 < temperature < hi * 0.95
+
+    if use_temperature:
+        model = make_model()
+        model.fit(x_context, y_context)
+        batches = [_apply_temperature(
+            model.predict(x_query[b:b + query_batch_size], output_margin=True), temperature)
+            for b in range(0, n_queries, query_batch_size)]
+        probs = np.vstack(batches)
+        classes_ = model.classes_
+
+    elif can_calibrate and calibration_method in ('sigmoid', 'isotonic'):
+        cv = min(calibration_cv, min_class_count)
+        model = CalibratedClassifierCV(make_model(), method=calibration_method, cv=cv, ensemble=False)
+        model.fit(x_context, y_context)
+        batches = [model.predict_proba(x_query[b:b + query_batch_size])
+                   for b in range(0, n_queries, query_batch_size)]
+        probs = np.vstack(batches)
+        classes_ = model.classes_
+
+    else:
+        # calibrate=False, or min_class_count < 2 so no fold split is possible
+        model = make_model()
+        model.fit(x_context, y_context)
+        batches = [model.predict_proba(x_query[b:b + query_batch_size])
+                   for b in range(0, n_queries, query_batch_size)]
+        probs = np.vstack(batches)
+        classes_ = model.classes_
 
     if probs.shape[1] != n_classes:
         aligned = np.zeros((n_queries, n_classes))
-        for i, cls in enumerate(model.classes_):
+        for i, cls in enumerate(classes_):
             if int(cls) < n_classes:
                 aligned[:, int(cls)] = probs[:, i]
         probs = aligned
@@ -73,7 +180,8 @@ def _process_feature_xgb(feat_info, context_table, query_matrix,
 def adapt_xgb_for_reconstruction(context_table, query_matrix, feature_value_indices,
                                  n_samples=None, n_estimators=100, max_depth=3,
                                  learning_rate=0.3, random_state=42,
-                                 max_workers=1, query_batch_size=512, device='cpu'):
+                                 max_workers=1, query_batch_size=512, device='cpu',
+                                 calibrate=False, calibration_cv=5, calibration_method='sigmoid'):
     if n_samples and len(context_table) > n_samples:
         context_table = context_table[:n_samples]
 
@@ -82,10 +190,12 @@ def adapt_xgb_for_reconstruction(context_table, query_matrix, feature_value_indi
     reconstruction_probs = np.zeros((n_queries, n_features_total))
 
     print(f"    Reconstructing {len(feature_value_indices)} features for {n_queries} queries "
-          f"(workers={max_workers}, batch_size={query_batch_size}, device={device})...")
+          f"(workers={max_workers}, batch_size={query_batch_size}, device={device}, "
+          f"calibrate={calibrate}, calibration_method={calibration_method})...")
 
     shared = (context_table, query_matrix, n_queries,
-              n_estimators, max_depth, learning_rate, random_state, query_batch_size, device)
+              n_estimators, max_depth, learning_rate, random_state, query_batch_size, device,
+              calibrate, calibration_cv, calibration_method)
 
     if max_workers > 1:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -105,52 +215,52 @@ def adapt_xgb_for_reconstruction(context_table, query_matrix, feature_value_indi
 def xgb_rule_learning(dataset, max_antecedents=2, context_samples=None,
                       n_estimators=100, max_depth=3, learning_rate=0.3,
                       ant_similarity=0.5, cons_similarity=0.8, random_state=42,
-                      max_workers=1, query_batch_size=512, device='cpu'):
+                      max_workers=1, query_batch_size=512, device='cpu',
+                      auto_calibrate=True):
+    """auto_calibrate applies the CALIBRATE_DATASETS policy automatically based on
+    dataset.attrs['name'] (set by get_ucimlrepo_datasets), so every caller gets the
+    right per-dataset calibration for free. Pass False to force the raw, uncalibrated
+    model regardless of dataset -- used by tune_xgboost.py, since hyperparameter search
+    should optimize the base model rather than a calibration layer applied on top of it.
+    """
     encoded_data, classes_per_feature, feature_names, encoder = prepare_categorical_data(dataset)
+
+    calibrate, calibration_method = (
+        _resolve_calibration(dataset.attrs.get('name')) if auto_calibrate else (False, 'sigmoid')
+    )
 
     print(f"Dataset shape: {encoded_data.shape}")
     print(f"Number of features: {len(classes_per_feature)}")
     print(f"Classes per feature: {classes_per_feature}")
 
-    test_matrix, test_descriptions, feature_value_indices = generate_test_matrix(
-        n_features=len(classes_per_feature),
-        classes_per_feature=classes_per_feature,
-        max_antecedents=max_antecedents,
-        use_zeros_for_unmarked=False
-    )
-
-    print(f"\nTest matrix shape: {test_matrix.shape}")
-    print(f"Number of test vectors: {len(test_descriptions)}")
+    def adapt_fn(query_matrix, feature_value_indices):
+        return adapt_xgb_for_reconstruction(
+            context_table=encoded_data,
+            query_matrix=query_matrix,
+            feature_value_indices=feature_value_indices,
+            n_samples=context_samples,
+            calibrate=calibrate,
+            calibration_method=calibration_method,
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            random_state=random_state,
+            max_workers=max_workers,
+            query_batch_size=query_batch_size,
+            device=device,
+        )
 
     print(f"\nUsing XGBoost for pattern reconstruction...")
-    reconstruction_probs = adapt_xgb_for_reconstruction(
-        context_table=encoded_data,
-        query_matrix=test_matrix,
-        feature_value_indices=feature_value_indices,
-        n_samples=context_samples,
-        n_estimators=n_estimators,
-        max_depth=max_depth,
-        learning_rate=learning_rate,
-        random_state=random_state,
-        max_workers=max_workers,
-        query_batch_size=query_batch_size,
-        device=device,
-    )
-
-    print(f"Reconstruction shape: {reconstruction_probs.shape}")
-
-    print(f"\nExtracting rules...")
-    rules = extract_rules_from_reconstruction(
-        prob_matrix=reconstruction_probs,
-        test_descriptions=test_descriptions,
-        feature_value_indices=feature_value_indices,
+    rules, feature_value_indices = probe_and_extract_rules(
+        classes_per_feature=classes_per_feature,
+        max_antecedents=max_antecedents,
+        adapt_fn=adapt_fn,
         ant_similarity=ant_similarity,
         cons_similarity=cons_similarity,
         feature_names=feature_names,
-        encoder=encoder
+        encoder=encoder,
+        use_zeros_for_unmarked=False
     )
-
-    print(f"{len(rules)} rules found!")
 
     return rules, feature_names, dataset.values
 
@@ -160,7 +270,7 @@ if __name__ == "__main__":
     print("XGBoost Baseline for Rule Learning")
     print("=" * 80)
 
-    n_runs = 1
+    n_runs = 10
     max_antecedents = 2
     ant_similarity = 0.5
     cons_similarity = 0.8
@@ -191,7 +301,7 @@ if __name__ == "__main__":
     print(f"Seeds for {n_runs} runs: {seed_sequence}")
 
     print("\nLoading datasets...")
-    datasets = get_ucimlrepo_datasets(size="normal", names=["breast_cancer"])
+    datasets = get_ucimlrepo_datasets(size="normal") + get_ucimlrepo_datasets(size="small")
 
     os.makedirs("out", exist_ok=True)
 

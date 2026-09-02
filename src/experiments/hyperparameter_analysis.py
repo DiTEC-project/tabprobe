@@ -140,7 +140,7 @@ def generate_reconstruction_cache(datasets, seed_sequence, methods, max_antecede
                     if run_idx == 0:
                         print(f"run 1/{len(seed_sequence)}", end="")
                     elif run_idx == len(seed_sequence) - 1:
-                        print(f"...{run_idx + 1} ✓")
+                        print(f"...{run_idx + 1} done")
 
                 except Exception as e:
                     print(f"\n    ERROR on run {run_idx + 1}: {e}")

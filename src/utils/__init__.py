@@ -8,8 +8,8 @@ Modules:
 - discretization: Feature discretization utilities
 - rule_extraction: Rule and itemset extraction utilities
 - rule_quality: Rule quality metrics
-- rule_saving: Rule saving and FP-Growth calibration utilities
-- itemset_saving: Itemset saving and FP-Growth calibration utilities
+- rule_saving: Rule saving utilities
+- itemset_saving: Itemset saving utilities
 - seed_utils: Seed management for reproducibility
 - test_matrix: Test matrix generation utilities
 """
@@ -41,6 +41,7 @@ from .reconstruction_cache import (
 )
 from .seed_utils import set_seed, generate_seed_sequence
 from .test_matrix import generate_test_matrix
+from .tuned_params import load_tuned_params
 
 __all__ = [
     # Data loading and preparation
@@ -71,4 +72,6 @@ __all__ = [
     'generate_seed_sequence',
     # Test matrix generation
     'generate_test_matrix',
+    # Tuned hyperparameter lookup
+    'load_tuned_params',
 ]

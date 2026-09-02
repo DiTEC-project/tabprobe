@@ -1,5 +1,6 @@
 """
-TabProbe: Unified interface for association rule learning with tabular foundation models.
+TabProbe: Unified interface for association rule learning from tabular prediction models,
+including tabular foundation models (TabPFN, TabICL, TabDPT), XGBoost, RandomForest etc.
 """
 import gc
 from typing import List, Dict, Optional, Tuple
@@ -10,7 +11,7 @@ import torch
 
 from src.utils.data_prep import prepare_categorical_data, add_gaussian_noise
 from src.utils.test_matrix import generate_test_matrix
-from src.utils.rule_extraction import extract_rules_from_reconstruction
+from src.utils.rule_extraction import extract_rules_from_reconstruction, get_significant_single_items
 from src.utils.rule_quality import calculate_rule_metrics
 
 
@@ -63,6 +64,8 @@ class TabProbe:
         - 'tabpfn'
         - 'tabicl'
         - 'tabdpt'
+        - 'xgboost'
+        - 'random_forest'
 
     Available metrics:
         - 'support': Rule support (frequency of antecedent + consequent)
@@ -85,7 +88,8 @@ class TabProbe:
         >>> rules_df = miner.to_dataframe()
     """
 
-    SUPPORTED_METHODS = ['tabpfn', 'tabicl', 'tabdpt']
+    SUPPORTED_METHODS = ['tabpfn', 'tabicl', 'tabdpt', 'xgboost', 'random_forest']
+    _TREE_METHODS = ('xgboost', 'random_forest')
     AVAILABLE_METRICS = ['support', 'confidence', 'rule_coverage', 'zhangs_metric', 'interestingness']
 
     def __init__(
@@ -94,7 +98,7 @@ class TabProbe:
             max_antecedents: int = 2,
             ant_similarity: float = 0.5,
             cons_similarity: float = 0.8,
-            n_estimators: int = 8,
+            n_estimators: Optional[int] = None,
             noise_factor: float = 0.5,
             n_bins: int = 5,
             random_state: int = 42,
@@ -103,16 +107,18 @@ class TabProbe:
         Initialize the RuleMiner.
 
         Args:
-            method: Foundation model to use for rule mining.
-                    Options: 'tabpfn', 'tabicl', 'tabdpt'
+            method: Model to use for rule mining.
+                    Options: 'tabpfn', 'tabicl', 'tabdpt', 'xgboost', 'random_forest'
             max_antecedents: Maximum number of items in the rule antecedent.
                              Higher values find more complex rules but increase computation.
             ant_similarity: Similarity threshold for antecedent validation (0.0 to 1.0).
                             Lower values extract more rules but may include weaker patterns.
             cons_similarity: Similarity threshold for consequent extraction (0.0 to 1.0).
                              Higher values extract only high-confidence consequents.
-            n_estimators: Number of ensemble models for prediction averaging.
-                          Higher values improve stability but increase computation.
+            n_estimators: For 'tabpfn'/'tabicl'/'tabdpt', number of ensemble models for
+                          prediction averaging (default 8). For 'xgboost'/'random_forest',
+                          number of trees (default 100). Defaults are method-dependent when
+                          left as None; pass an explicit value to override either default.
             noise_factor: Gaussian noise factor added to context data (0.0 to 1.0).
                           Helps prevent overfitting to exact patterns.
             n_bins: Number of bins for discretizing numerical columns (equal-frequency binning).
@@ -125,6 +131,8 @@ class TabProbe:
         self.max_antecedents = max_antecedents
         self.ant_similarity = ant_similarity
         self.cons_similarity = cons_similarity
+        if n_estimators is None:
+            n_estimators = 100 if method in self._TREE_METHODS else 8
         self.n_estimators = n_estimators
         self.noise_factor = noise_factor
         self.n_bins = n_bins
@@ -175,14 +183,16 @@ class TabProbe:
         self.feature_names_ = feature_names
         self.encoder_ = encoder
 
+        noisy_context = add_gaussian_noise(encoded_data, noise_factor=self.noise_factor)
+        n_features = len(classes_per_feature)
+
         test_matrix, test_descriptions, feature_value_indices = generate_test_matrix(
-            n_features=len(classes_per_feature),
+            n_features=n_features,
             classes_per_feature=classes_per_feature,
-            max_antecedents=self.max_antecedents,
+            min_antecedents=1,
+            max_antecedents=1,
             use_zeros_for_unmarked=False
         )
-
-        noisy_context = add_gaussian_noise(encoded_data, noise_factor=self.noise_factor)
 
         reconstruction_probs = self._reconstruct(
             noisy_context, encoded_data, test_matrix, feature_value_indices
@@ -197,6 +207,34 @@ class TabProbe:
             feature_names=feature_names,
             encoder=encoder
         )
+
+        if self.max_antecedents > 1:
+            significant_items = get_significant_single_items(
+                reconstruction_probs, test_descriptions, feature_value_indices, self.ant_similarity
+            )
+
+            pruned_matrix, pruned_descriptions, _ = generate_test_matrix(
+                n_features=n_features,
+                classes_per_feature=classes_per_feature,
+                min_antecedents=2,
+                max_antecedents=self.max_antecedents,
+                use_zeros_for_unmarked=False,
+                allowed_items=significant_items
+            )
+
+            if len(pruned_descriptions) > 0:
+                pruned_probs = self._reconstruct(
+                    noisy_context, encoded_data, pruned_matrix, feature_value_indices
+                )
+                rules += extract_rules_from_reconstruction(
+                    prob_matrix=pruned_probs,
+                    test_descriptions=pruned_descriptions,
+                    feature_value_indices=feature_value_indices,
+                    ant_similarity=self.ant_similarity,
+                    cons_similarity=self.cons_similarity,
+                    feature_names=feature_names,
+                    encoder=encoder
+                )
 
         self.rules_ = rules
         self.statistics_ = {'num_rules': len(rules)}
@@ -213,8 +251,12 @@ class TabProbe:
             return self._reconstruct_tabpfn(noisy_context, clean_context, query_matrix, feature_value_indices)
         elif self.method == 'tabicl':
             return self._reconstruct_tabicl(noisy_context, clean_context, query_matrix, feature_value_indices)
-        else:  # tabdpt
+        elif self.method == 'tabdpt':
             return self._reconstruct_tabdpt(noisy_context, clean_context, query_matrix, feature_value_indices)
+        elif self.method == 'xgboost':
+            return self._reconstruct_xgboost(clean_context, query_matrix, feature_value_indices)
+        else:  # random_forest
+            return self._reconstruct_random_forest(clean_context, query_matrix, feature_value_indices)
 
     def _reconstruct_tabpfn(self, noisy_context, clean_context, query_matrix, feature_value_indices):
         from tabpfn import TabPFNClassifier
@@ -318,6 +360,29 @@ class TabProbe:
             gc.collect()
 
         return reconstruction_probs
+
+    def _reconstruct_xgboost(self, clean_context, query_matrix, feature_value_indices):
+        from src.experiments.rule_mining.xgboost_experiments import adapt_xgb_for_reconstruction
+
+        return adapt_xgb_for_reconstruction(
+            context_table=clean_context,
+            query_matrix=query_matrix,
+            feature_value_indices=feature_value_indices,
+            n_estimators=self.n_estimators,
+            random_state=self.random_state,
+            device=self.device,
+        )
+
+    def _reconstruct_random_forest(self, clean_context, query_matrix, feature_value_indices):
+        from src.experiments.rule_mining.random_forest_experiments import adapt_rf_for_reconstruction
+
+        return adapt_rf_for_reconstruction(
+            context_table=clean_context,
+            query_matrix=query_matrix,
+            feature_value_indices=feature_value_indices,
+            n_estimators=self.n_estimators,
+            random_state=self.random_state,
+        )
 
     def _align_probs(self, probs: np.ndarray, n_queries: int, n_classes: int) -> np.ndarray:
         """Align probability matrix dimensions when model returns fewer classes."""

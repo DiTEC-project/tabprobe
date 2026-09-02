@@ -103,7 +103,9 @@ def discretize_numerical_features(
             continue
 
     if discretized_columns:
+        attrs = X.attrs  # pd.concat doesn't propagate .attrs, so carry it over explicitly
         X = pd.concat([X, pd.DataFrame(discretized_columns)], axis=1)
         X = X.drop(columns=columns_to_discretize)
+        X.attrs = attrs
 
     return X

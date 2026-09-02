@@ -60,8 +60,13 @@ from src.utils import (
     prepare_categorical_data,
     add_gaussian_noise,
     generate_test_matrix,
-    extract_frequent_itemsets_from_reconstruction
+    extract_frequent_itemsets_from_reconstruction,
+    load_tuned_params,
 )
+
+_PARAMS_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+XGBOOST_PARAMS_JSON = os.path.join(_PARAMS_DIR, "xgboost_best_parameters.json")
+RANDOM_FOREST_PARAMS_JSON = os.path.join(_PARAMS_DIR, "random_forest_best_parameters.json")
 
 # Import itemset mining functions
 from src.experiments.itemset_mining.aerial_itemsets_experiments import aerial_itemset_learning
@@ -69,6 +74,15 @@ from src.experiments.itemset_mining.tabpfn_itemsets_experiments import adapt_tab
 from src.experiments.itemset_mining.tabicl_itemsets_experiments import adapt_tabicl_for_reconstruction
 from src.experiments.itemset_mining.tabdpt_itemsets_experiments import adapt_tabdpt_for_reconstruction
 from src.experiments.itemset_mining.fpgrowth_itemsets_experiments import fpgrowth_itemset_learning
+from src.experiments.itemset_mining.random_forest_itemsets_experiments import rf_itemset_learning
+from src.experiments.itemset_mining.xgboost_itemsets_experiments import xgb_itemset_learning
+
+try:
+    import torch as _torch
+
+    _CUDA_AVAILABLE = _torch.cuda.is_available()
+except ImportError:
+    _CUDA_AVAILABLE = False
 
 # Class column names for each dataset (always the last column in original CSV files)
 DATASET_CLASS_COLUMNS = {
@@ -77,9 +91,7 @@ DATASET_CLASS_COLUMNS = {
     'mushroom': 'poisonous',
     'chess_king_rook_vs_king_pawn': 'wtoeg',
     'spambase': 'Class',
-    # 'lung_cancer': 'class',
     'hepatitis': 'Class',
-    # 'breast_cancer_coimbra': 'Classification',
     'cervical_cancer_behavior_risk': 'ca_cervix',
     'autism_screening_adolescent': 'Class/ASD',
     'acute_inflammations': 'bladder-inflammation',
@@ -405,6 +417,39 @@ def mine_itemsets_for_method(method, train_data, dataset_name, hyperparams, seed
             )
             itemsets = result['itemsets']
 
+    elif method == 'random_forest':
+        # RandomForest is cheap to refit per fold, no caching needed
+        tuned = load_tuned_params(RANDOM_FOREST_PARAMS_JSON, dataset_name)
+        itemsets, _, _, _ = rf_itemset_learning(
+            dataset=train_data,
+            max_itemset_length=hyperparams['max_length'],
+            context_samples=hyperparams.get('context_samples', None),
+            similarity=hyperparams['similarity'],
+            n_estimators=tuned.get('n_estimators', hyperparams.get('n_estimators', 100)),
+            max_depth=tuned.get('max_depth', hyperparams.get('max_depth', None)),
+            min_samples_leaf=tuned.get('min_samples_leaf', hyperparams.get('min_samples_leaf', 1)),
+            random_state=hyperparams.get('random_state', 42),
+            max_workers=hyperparams.get('max_workers', 4),
+            query_batch_size=hyperparams.get('query_batch_size', 512)
+        )
+
+    elif method == 'xgboost':
+        # XGBoost is cheap to refit per fold, no caching needed
+        tuned = load_tuned_params(XGBOOST_PARAMS_JSON, dataset_name)
+        itemsets, _, _, _ = xgb_itemset_learning(
+            dataset=train_data,
+            max_itemset_length=hyperparams['max_length'],
+            context_samples=hyperparams.get('context_samples', None),
+            similarity=hyperparams['similarity'],
+            n_estimators=tuned.get('n_estimators', hyperparams.get('n_estimators', 100)),
+            max_depth=tuned.get('max_depth', hyperparams.get('max_depth', 3)),
+            learning_rate=tuned.get('learning_rate', hyperparams.get('learning_rate', 0.3)),
+            random_state=hyperparams.get('random_state', 42),
+            max_workers=hyperparams.get('max_workers', 4),
+            query_batch_size=hyperparams.get('query_batch_size', 512),
+            device=hyperparams.get('device', 'cpu')
+        )
+
     elif method.startswith('fpgrowth'):
         # FP-Growth is deterministic and fast, no caching needed
         itemsets, _ = fpgrowth_itemset_learning(
@@ -645,6 +690,11 @@ if __name__ == "__main__":
         'tabpfn': {'max_length': 2, 'similarity': 0.3, 'context_samples': None, 'n_estimators': 8},
         'tabicl': {'max_length': 2, 'similarity': 0.3, 'context_samples': None, 'n_estimators': 8},
         'tabdpt': {'max_length': 2, 'similarity': 0.3, 'context_samples': None, 'n_ensembles': 8},
+        'random_forest': {'max_length': 2, 'similarity': 0.3, 'context_samples': None,
+                          'n_estimators': 100, 'max_depth': None},
+        'xgboost': {'max_length': 2, 'similarity': 0.3, 'context_samples': None,
+                    'n_estimators': 100, 'max_depth': 3, 'learning_rate': 0.3,
+                    'device': 'cuda' if _CUDA_AVAILABLE else 'cpu'},
         'fpgrowth_0.5': {'max_length': 2, 'min_support': 0.5},
         'fpgrowth_0.3': {'max_length': 2, 'min_support': 0.3},
         'fpgrowth_0.2': {'max_length': 2, 'min_support': 0.2},
@@ -654,9 +704,9 @@ if __name__ == "__main__":
     }
 
     # Methods to run (all available methods by default)
-    # methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.2', 'fpgrowth_0.1', 'fpgrowth_0.05',
-    #            'fpgrowth_0.01']
-    methods = ['tabpfn', 'tabicl', 'tabdpt']
+    # methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'xgboost', 'random_forest',
+    # 'fpgrowth_0.3', 'fpgrowth_0.2', 'fpgrowth_0.1', 'fpgrowth_0.05', 'fpgrowth_0.01']
+    methods = ['xgboost']
     n_runs = 10
     base_seed = 42
     n_folds = 5
@@ -668,7 +718,7 @@ if __name__ == "__main__":
         print(f"  {method}: {hyperparams[method]}")
 
     # Load all datasets by default
-    datasets = get_ucimlrepo_datasets()
+    datasets = get_ucimlrepo_datasets(size="small") + get_ucimlrepo_datasets(size="normal")
     all_datasets = datasets
 
     os.makedirs("out", exist_ok=True)
@@ -704,7 +754,7 @@ if __name__ == "__main__":
                 print(f"  Run {run_idx + 1}/{n_runs} (seed={run_seed})")
 
                 # Add random_state to hyperparams for methods that use it
-                if method in ['aerial', 'tabpfn']:
+                if method in ['aerial', 'tabpfn', 'random_forest', 'xgboost']:
                     current_hyperparams['random_state'] = run_seed
 
                 try:

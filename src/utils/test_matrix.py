@@ -9,7 +9,7 @@ from itertools import combinations, product
 
 
 def generate_test_matrix(n_features, classes_per_feature, max_antecedents=2,
-                         use_zeros_for_unmarked=False):
+                         use_zeros_for_unmarked=False, min_antecedents=1, allowed_items=None):
     """
     Generate test matrix (query) - creates ALL antecedent combinations at once.
 
@@ -22,6 +22,12 @@ def generate_test_matrix(n_features, classes_per_feature, max_antecedents=2,
                                Using zeros is better for TabICL since it matches the "missing"
                                semantic and doesn't confuse similarity-based matching with
                                non-existent [0.33, 0.33, 0.33] patterns that never appear in real data.
+        min_antecedents: Smallest antecedent length to generate (default 1). Combined with
+                        allowed_items, this generates only the higher levels, restricted to
+                        items that already survived a lower level.
+        allowed_items: Optional set of (feature_idx, class_idx) tuples. When given, every item
+                      in every generated combination must be in this set (Apriori-style
+                      candidate pruning). None means no restriction.
 
     Returns:
         test_matrix: numpy array of shape (n_test_vectors, total_dimensions)
@@ -51,11 +57,19 @@ def generate_test_matrix(n_features, classes_per_feature, max_antecedents=2,
 
     # Generate ALL combinations at once for all antecedent lengths
     # This is more efficient than PyAerial's incremental approach
-    for r in range(1, max_antecedents + 1):
+    for r in range(min_antecedents, max_antecedents + 1):
         # Get all feature combinations of size r
         for feature_indices in combinations(range(n_features), r):
             # For each feature combination, get all class combinations
-            class_ranges = [list(range(classes_per_feature[f_idx])) for f_idx in feature_indices]
+            if allowed_items is None:
+                class_ranges = [list(range(classes_per_feature[f_idx])) for f_idx in feature_indices]
+            else:
+                class_ranges = [
+                    [c for c in range(classes_per_feature[f_idx]) if (f_idx, c) in allowed_items]
+                    for f_idx in feature_indices
+                ]
+                if any(len(cr) == 0 for cr in class_ranges):
+                    continue
 
             # Generate all class combinations using product
             for class_combo in product(*class_ranges):

@@ -59,7 +59,11 @@ from src.experiments.classification.cba.data_structures.consequent import Conseq
 from src.experiments.classification.cba.data_structures.antecedent import Antecedent
 from src.experiments.classification.cba.data_structures.item import Item
 
-from src.utils import get_ucimlrepo_datasets, generate_seed_sequence, calculate_rule_metrics
+from src.utils import get_ucimlrepo_datasets, generate_seed_sequence, calculate_rule_metrics, load_tuned_params
+
+_PARAMS_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+XGBOOST_PARAMS_JSON = os.path.join(_PARAMS_DIR, "xgboost_best_parameters.json")
+RANDOM_FOREST_PARAMS_JSON = os.path.join(_PARAMS_DIR, "random_forest_best_parameters.json")
 
 # Import rule mining functions
 from src.experiments.rule_mining.aerial_experiments import aerial_rule_learning
@@ -67,6 +71,15 @@ from src.experiments.rule_mining.tabpfn_experiments import tabpfn_rule_learning
 from src.experiments.rule_mining.tabicl_experiments import tabicl_rule_learning
 from src.experiments.rule_mining.tabdpt_experiments import tabdpt_rule_learning
 from src.experiments.rule_mining.fpgrowth_experiments import fpgrowth_rule_learning
+from src.experiments.rule_mining.random_forest_experiments import rf_rule_learning
+from src.experiments.rule_mining.xgboost_experiments import xgb_rule_learning
+
+try:
+    import torch as _torch
+
+    _CUDA_AVAILABLE = _torch.cuda.is_available()
+except ImportError:
+    _CUDA_AVAILABLE = False
 
 # Class column names for each dataset (always the last column in original CSV files)
 DATASET_CLASS_COLUMNS = {
@@ -75,9 +88,7 @@ DATASET_CLASS_COLUMNS = {
     'mushroom': 'poisonous',
     'chess_king_rook_vs_king_pawn': 'wtoeg',
     'spambase': 'Class',
-    # 'lung_cancer': 'class',
     'hepatitis': 'Class',
-    # 'breast_cancer_coimbra': 'Classification',
     'cervical_cancer_behavior_risk': 'ca_cervix',
     'autism_screening_adolescent': 'Class/ASD',
     'acute_inflammations': 'bladder-inflammation',
@@ -154,6 +165,11 @@ def get_aerial_dataset_parameters(dataset_name, dataset_size='small'):
             'batch_size': 1,
             'layer_dims': [8],
             'epochs': 20
+        },
+        'chess_king_rook_vs_king_pawn': {
+            'batch_size': 8,
+            'layer_dims': [16, 4],
+            'epochs': 10
         }
     }
 
@@ -165,7 +181,7 @@ def get_aerial_dataset_parameters(dataset_name, dataset_size='small'):
             'epochs': 2
         },
         'small': {
-            'batch_size': 2,
+            'batch_size': 5,
             'layer_dims': [4],
             'epochs': 10
         }
@@ -217,14 +233,17 @@ def save_classifier(clf, rule_miner, dataset_name, seed, fold_idx=None, output_d
     return output_file
 
 
-def mine_rules_for_method(method, train_data, hyperparams):
+def mine_rules_for_method(method, train_data, hyperparams, dataset_name=None):
     """
     Mine rules from training data using specified method.
 
     Args:
-        method: Method name ('aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_X')
+        method: Method name ('aerial', 'tabpfn', 'tabicl', 'tabdpt', 'random_forest',
+                'xgboost', 'fpgrowth_X')
         train_data: Training dataframe
         hyperparams: Hyperparameters for the method
+        dataset_name: Dataset name, used to look up Optuna-tuned per-dataset parameters
+                for random_forest/xgboost when available
 
     Returns:
         List of mined rules
@@ -237,7 +256,7 @@ def mine_rules_for_method(method, train_data, hyperparams):
             cons_similarity=hyperparams['cons_similarity'],
             batch_size=hyperparams['batch_size'],
             layer_dims=hyperparams['layer_dims'],
-            epochs=hyperparams['epochs']
+            epochs=hyperparams['epochs'],
         )
     elif method == 'tabpfn':
         rules, feature_names, original_data = tabpfn_rule_learning(
@@ -283,6 +302,45 @@ def mine_rules_for_method(method, train_data, hyperparams):
                 max_workers=hyperparams.get('max_workers', 4),
                 query_batch_size=hyperparams.get('query_batch_size', 512)
             )
+        rules, _ = calculate_rule_metrics(
+            rules=rules,
+            data=original_data,
+            feature_names=feature_names
+        )
+    elif method == 'random_forest':
+        tuned = load_tuned_params(RANDOM_FOREST_PARAMS_JSON, dataset_name)
+        rules, feature_names, original_data = rf_rule_learning(
+            train_data,
+            max_antecedents=hyperparams['max_antecedents'],
+            context_samples=hyperparams.get('context_samples', None),
+            ant_similarity=hyperparams['ant_similarity'],
+            cons_similarity=hyperparams['cons_similarity'],
+            n_estimators=tuned.get('n_estimators', hyperparams['n_estimators']),
+            max_depth=tuned.get('max_depth', hyperparams.get('max_depth', None)),
+            min_samples_leaf=tuned.get('min_samples_leaf', hyperparams.get('min_samples_leaf', 1)),
+            max_workers=hyperparams.get('max_workers', 4),
+            query_batch_size=hyperparams.get('query_batch_size', 512)
+        )
+        rules, _ = calculate_rule_metrics(
+            rules=rules,
+            data=original_data,
+            feature_names=feature_names
+        )
+    elif method == 'xgboost':
+        tuned = load_tuned_params(XGBOOST_PARAMS_JSON, dataset_name)
+        rules, feature_names, original_data = xgb_rule_learning(
+            train_data,
+            max_antecedents=hyperparams['max_antecedents'],
+            context_samples=hyperparams.get('context_samples', None),
+            ant_similarity=hyperparams['ant_similarity'],
+            cons_similarity=hyperparams['cons_similarity'],
+            n_estimators=tuned.get('n_estimators', hyperparams['n_estimators']),
+            max_depth=tuned.get('max_depth', hyperparams['max_depth']),
+            learning_rate=tuned.get('learning_rate', hyperparams['learning_rate']),
+            max_workers=hyperparams.get('max_workers', 4),
+            query_batch_size=hyperparams.get('query_batch_size', 512),
+            device=hyperparams.get('device', 'cpu')
+        )
         rules, _ = calculate_rule_metrics(
             rules=rules,
             data=original_data,
@@ -334,7 +392,7 @@ def evaluate_cba_with_cv(dataset, method, dataset_name, hyperparams,
         # Mine rules from training data only
         fold_start_time = time.time()
         try:
-            mined_rules = mine_rules_for_method(method, train_df, hyperparams)
+            mined_rules = mine_rules_for_method(method, train_df, hyperparams, dataset_name=dataset_name)
 
         except Exception as e:
             print(f"Error mining rules: {e}")
@@ -455,15 +513,22 @@ if __name__ == "__main__":
     # Hyperparameters for each method
     # context_samples = None means use the entire table
     hyperparams = {
-        'aerial': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8},
-        'tabpfn': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8,
+        'aerial': {'max_antecedents': 2, 'ant_similarity': 0.3, 'cons_similarity': 0.8},
+        'tabpfn': {'max_antecedents': 2, 'ant_similarity': 0.3, 'cons_similarity': 0.8,
                    'context_samples': None, 'n_estimators': 8,
                    'max_workers': 4, 'query_batch_size': 4096},
-        'tabicl': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8,
+        'tabicl': {'max_antecedents': 2, 'ant_similarity': 0.3, 'cons_similarity': 0.8,
                    'context_samples': None, 'n_estimators': 8,
                    'max_workers': 4, 'query_batch_size': 4096},
-        'tabdpt': {'max_antecedents': 2, 'ant_similarity': 0.2, 'cons_similarity': 0.8,
+        'tabdpt': {'max_antecedents': 2, 'ant_similarity': 0.3, 'cons_similarity': 0.8,
                    'n_ensembles': 8, 'max_workers': 4, 'query_batch_size': 4096},
+        'random_forest': {'max_antecedents': 2, 'ant_similarity': 0.1, 'cons_similarity': 0.8,
+                          'context_samples': None, 'n_estimators': 100, 'max_depth': None,
+                          'max_workers': 4, 'query_batch_size': 4096},
+        'xgboost': {'max_antecedents': 2, 'ant_similarity': 0.3, 'cons_similarity': 0.8,
+                    'context_samples': None, 'n_estimators': 100, 'max_depth': 3,
+                    'learning_rate': 0.3, 'max_workers': 4, 'query_batch_size': 4096,
+                    'device': 'cuda' if _CUDA_AVAILABLE else 'cpu'},
         'fpgrowth_0.5': {'max_antecedents': 2, 'min_support': 0.5, 'min_confidence': 0.8},
         'fpgrowth_0.3': {'max_antecedents': 2, 'min_support': 0.3, 'min_confidence': 0.8},
         'fpgrowth_0.2': {'max_antecedents': 2, 'min_support': 0.2, 'min_confidence': 0.8},
@@ -478,19 +543,23 @@ if __name__ == "__main__":
             'tabdpt': 0.1,
             'tabpfn': 0.01,
             'tabicl': 0.01,
+            'xgboost': 0.01,
+            'random_forest': 0.01
         },
         'cervical_cancer_behavior_risk': {
             'aerial': 0.1,
             'tabpfn': 0.1,
             'tabicl': 0.1,
             'tabdpt': 0.1,
-        },
+            'xgboost': 0.1,
+            'random_forest': 0.01
+        }
     }
 
     # Methods to run (all available methods by default)
-    # methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'fpgrowth_0.3', 'fpgrowth_0.2', 'fpgrowth_0.1', 'fpgrowth_0.05',
-    #            'fpgrowth_0.01']
-    methods = ['tabpfn', 'tabicl']
+    # methods = ['aerial', 'tabpfn', 'tabicl', 'tabdpt', 'random_forest', 'xgboost',
+    #               'fpgrowth_0.3', 'fpgrowth_0.2', 'fpgrowth_0.1', 'fpgrowth_0.05', 'fpgrowth_0.01']
+    methods = ['random_forest']
     n_runs = 10
     base_seed = 42
     n_folds = 5
@@ -502,8 +571,8 @@ if __name__ == "__main__":
         print(f"  {method}: {hyperparams[method]}")
 
     # Load all datasets by default
-    dataset_size = "normal"
-    datasets = get_ucimlrepo_datasets(size=dataset_size, names=["breast_cancer"])
+    dataset_size = "small"
+    datasets = get_ucimlrepo_datasets(size="small") + get_ucimlrepo_datasets(size="normal")
     all_datasets = datasets
 
     os.makedirs("out", exist_ok=True)

@@ -1,3 +1,6 @@
+"""
+This file runs a statisical significance analysis on our results file TabProbe.xlsx
+"""
 from pathlib import Path
 
 import numpy as np
@@ -8,7 +11,7 @@ from scipy.stats import friedmanchisquare, wilcoxon
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-INPUT = PROJECT_ROOT / "ARM with TFMs.xlsx"
+INPUT = PROJECT_ROOT / "TabProbe.xlsx"
 OUTPUT_DIR = PROJECT_ROOT / "statistical_analysis_results"
 SHEET = "Average Results"
 ALPHA = 0.05
@@ -36,6 +39,7 @@ METHOD_MAP = {
     "FP-Growth\nmin_supp=0.2": "FP-Growth min_supp=0.2",
     "FP-Growth\nmin_supp=0.1": "FP-Growth min_supp=0.1",
     "XGBoost": "XGBoost",
+    "Random\nForest": "RandomForest",
 }
 
 METHODS = list(METHOD_MAP.values())
@@ -53,7 +57,7 @@ def read_block(sheet, start_col: int) -> pd.DataFrame:
     headers = [sheet.cell(2, start_col + offset).value for offset in range(9)]
     rows = []
     current_algorithm = None
-    for row in range(3, 58):
+    for row in range(3, 68):
         values = [sheet.cell(row, start_col + offset).value for offset in range(9)]
         if values[0] is not None:
             current_algorithm = values[0]

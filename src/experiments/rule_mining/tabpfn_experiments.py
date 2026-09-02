@@ -14,8 +14,7 @@ from tabpfn import TabPFNClassifier
 from tabpfn_extensions.many_class import ManyClassClassifier
 
 from src.utils.data_prep import prepare_categorical_data, add_gaussian_noise
-from src.utils.test_matrix import generate_test_matrix
-from src.utils.rule_extraction import extract_rules_from_reconstruction
+from src.utils.probing import probe_and_extract_rules
 from src.utils import (
     get_ucimlrepo_datasets,
     calculate_rule_metrics,
@@ -70,7 +69,6 @@ def _process_feature_tabpfn(feat_info, noisy_context, context_table, query_matri
 def adapt_tabpfn_for_reconstruction(tabpfn_model, context_table, query_matrix,
                                     feature_value_indices, n_samples=None, noise_factor=0.5,
                                     max_workers=1, query_batch_size=512):
-    print(context_samples)
     if n_samples and len(context_table) > n_samples:
         context_table = context_table[:n_samples]
 
@@ -130,20 +128,6 @@ def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100, n_esti
     print(f"Number of features: {len(classes_per_feature)}")
     print(f"Classes per feature: {classes_per_feature}")
 
-    # Generate test matrix (query patterns)
-    # Use equal probabilities for unmarked features (NOT zeros)
-    # Since we add noise to the context, TabPFN will see values between 0 and 1,
-    # making [0.33, 0.33, 0.33] patterns more natural and consistent with the training distribution
-    test_matrix, test_descriptions, feature_value_indices = generate_test_matrix(
-        n_features=len(classes_per_feature),
-        classes_per_feature=classes_per_feature,
-        max_antecedents=max_antecedents,
-        use_zeros_for_unmarked=False  # Equal probabilities work better with noisy context
-    )
-
-    print(f"\nTest matrix shape: {test_matrix.shape}")
-    print(f"Number of test vectors: {len(test_descriptions)}")
-
     tabpfn_model = TabPFNClassifier(
         n_estimators=n_estimators,
         random_state=random_state,
@@ -151,33 +135,31 @@ def tabpfn_rule_learning(dataset, max_antecedents=2, context_samples=100, n_esti
         inference_precision='auto'
     )
 
-    # Adapt TabPFN for reconstruction
+    # Use equal probabilities for unmarked features (NOT zeros)
+    # Since we add noise to the context, TabPFN will see values between 0 and 1,
+    # making [0.33, 0.33, 0.33] patterns more natural and consistent with the training distribution
+    def adapt_fn(query_matrix, feature_value_indices):
+        return adapt_tabpfn_for_reconstruction(
+            tabpfn_model=tabpfn_model,
+            context_table=encoded_data,
+            query_matrix=query_matrix,
+            feature_value_indices=feature_value_indices,
+            n_samples=context_samples,
+            max_workers=max_workers,
+            query_batch_size=query_batch_size
+        )
+
     print(f"\nUsing TabPFN for pattern reconstruction...")
-    reconstruction_probs = adapt_tabpfn_for_reconstruction(
-        tabpfn_model=tabpfn_model,
-        context_table=encoded_data,
-        query_matrix=test_matrix,
-        feature_value_indices=feature_value_indices,
-        n_samples=context_samples,
-        max_workers=max_workers,
-        query_batch_size=query_batch_size
-    )
-
-    print(f"Reconstruction shape: {reconstruction_probs.shape}")
-
-    # Extract rules using PyAerial logic
-    print(f"\nExtracting rules...")
-    rules = extract_rules_from_reconstruction(
-        prob_matrix=reconstruction_probs,
-        test_descriptions=test_descriptions,
-        feature_value_indices=feature_value_indices,
+    rules, feature_value_indices = probe_and_extract_rules(
+        classes_per_feature=classes_per_feature,
+        max_antecedents=max_antecedents,
+        adapt_fn=adapt_fn,
         ant_similarity=ant_similarity,
         cons_similarity=cons_similarity,
         feature_names=feature_names,
-        encoder=encoder  # Pass encoder to map class indices to actual values
+        encoder=encoder,
+        use_zeros_for_unmarked=False  # Equal probabilities work better with noisy context
     )
-
-    print(f"{len(rules)} rules found!")
 
     return rules, feature_names, dataset.values
 

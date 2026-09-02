@@ -1,8 +1,7 @@
 """
-Itemset Saving and FP-Growth Calibration Utilities
+Itemset Saving Utilities
 
-Common utilities for saving frequent itemsets across all mining methods and
-calculating FP-Growth calibration thresholds.
+Common utilities for saving frequent itemsets across all mining methods.
 """
 import os
 import json

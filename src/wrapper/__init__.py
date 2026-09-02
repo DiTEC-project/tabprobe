@@ -1,8 +1,8 @@
 """
-Rule Mining with Tabular Foundation Models
+Model-agnostic association rule learning
 
-A library for extracting association rules from categorical data using
-tabular foundation models (TabPFN, TabICL, TabDPT).
+A library for extracting association rules from categorical data using various tabular prediction models, including
+tabular foundation models (TabPFN, TabICL, TabDPT), XGBoost, RandomForest etc.
 
 Example usage:
     from ucimlrepo import fetch_ucirepo

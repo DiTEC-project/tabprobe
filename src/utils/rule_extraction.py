@@ -109,6 +109,18 @@ def extract_rules_from_reconstruction(prob_matrix, test_descriptions, feature_va
     return association_rules
 
 
+def get_significant_single_items(prob_matrix, test_descriptions, feature_value_indices, ant_similarity=0.5):
+    significant = set()
+    for i, antecedent_desc in enumerate(test_descriptions):
+        if len(antecedent_desc) != 1:
+            continue
+        feat_idx, class_idx = antecedent_desc[0]
+        ant_idx = feature_value_indices[feat_idx]['start'] + class_idx
+        if prob_matrix[i, ant_idx] > ant_similarity:
+            significant.add((feat_idx, class_idx))
+    return significant
+
+
 def calculate_itemset_support(itemset, data, feature_names):
     """
     Calculate support for an itemset by checking how many rows in the data contain all items.

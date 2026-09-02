@@ -1,11 +1,12 @@
 # TabProbe: Model-Agnostic Association Rule Learning with Tabular Foundation Models
 
-This repository contains the experimental source code for the paper 
-**"Model-Agnostic Association Rule Learning with Tabular Foundation Models"**, TabProbe algorithm (Algorithm 2 in the paper) and the baselines.
+This repository contains the experimental source code for the paper
+**"Model-Agnostic Association Rule Learning with Tabular Foundation Models"**, TabProbe algorithm (Algorithm 2 in the
+paper) and the baselines.
 
 In addition, it provides a reusable Python
 wrapper that enables researchers and practitioners to mine association rules
-from tabular foundation models without having to reproduce the full experimental pipeline.
+from tabular foundation models, xgboost and random forest without having to reproduce the full experimental pipeline.
 
 The tabular foundation models supported both in the experiments and in the wrapper library are
 **TabPFN** [1], **TabICL** [2], and **TabDPT** [3].
@@ -37,14 +38,20 @@ and baselines used in the experiments.
 │   │   │   ├── aerial_experiments.py
 │   │   │   ├── fpgrowth_experiments.py
 │   │   │   ├── xgboost_experiments.py
-│   │   │   └── tune_xgboost.py         # Optuna-based hyperparameter tuning for XGBoost
+│   │   │   ├── tune_xgboost.py          # Optuna-based hyperparameter tuning for XGBoost
+│   │   │   ├── random_forest_experiments.py
+│   │   │   └── tune_random_forest.py    # Optuna-based hyperparameter tuning for Random Forest
 │   │   ├── itemset_mining/             # Frequent itemset mining (required for running CORELS)
 │   │   ├── classification/             # CBA and CORELS classification experiments
 │   │   │   ├── cba_experiments.py
 │   │   │   └── corels_experiments.py
+│   │   ├── calibration/
+│   │   │   └── calibration_diagnostics.py  # Calibration diagnostics (ECE, Brier, reliability)
+│   │   ├── binning_sensitivity_analysis.py  # Discretization bin-count sensitivity analysis
 │   │   ├── scalability_experiments.py  # Scalability experiments
 │   │   ├── hyperparameter_analysis.py  # Hyper-parameter analysis experiment
-│   │   └── xgboost_best_parameters.json  # Tuned XGBoost parameters per dataset
+│   │   ├── xgboost_best_parameters.json  # Tuned XGBoost parameters per dataset
+│   │   └── random_forest_best_parameters.json  # Tuned Random Forest parameters per dataset
 │   └── utils/                          # Shared utilities
 │       ├── data_loading.py             # UCI ML repo data loading
 │       ├── data_prep.py                # Data encoding
@@ -89,12 +96,14 @@ average maximal itemset size of 4.
 3 tabular foundation
 models ([TabPFNv3](https://github.com/PriorLabs/TabPFN) [1], [TabICLv2](https://github.com/soda-inria/tabicl) [2],
 and [TabDPT](https://github.com/layer6ai-labs/TabDPT-inference) [3]),
-Aerial+ [9], FP-Growth [5], and XGBoost [12] are used in the experiments. Please follow the hyperlinks to access detailed instructions
+Aerial+ [9], FP-Growth [5], and XGBoost [12] are used in the experiments. Please follow the hyperlinks to access
+detailed instructions
 on installations of individual tabular foundation models. Aerial+ is implemented
 with PyAerial [10] and FP-Growth
 is implemented with [Mlxtend](https://rasbt.github.io/mlxtend/user_guide/frequent_patterns/fpgrowth/) [11].
 XGBoost applies the same conditional probability estimation pipeline as the tabular foundation models,
-using gradient-boosted trees trained per feature. Hyperparameters are tuned per dataset with Optuna [13].
+using gradient-boosted trees trained per feature. Random Forest applies the same pipeline using bagged
+decision trees trained per feature. Hyperparameters for both are tuned per dataset with Optuna [13].
 
 In downstream classification experiments, CORELS [8] is implemented following its original
 code [repository](https://github.com/corels/corels), and CBA [7] is implemented
@@ -154,6 +163,7 @@ python src/experiments/rule_mining/tabdpt_experiments.py
 python src/experiments/rule_mining/aerial_experiments.py
 python src/experiments/rule_mining/fpgrowth_experiments.py
 python src/experiments/rule_mining/xgboost_experiments.py
+python src/experiments/rule_mining/random_forest_experiments.py
 
 # Classification experiments
 python src/experiments/classification/cba_experiments.py
@@ -189,6 +199,35 @@ This runs 50 Optuna trials per dataset and saves the best parameters to
 `src/experiments/xgboost_best_parameters.json`, which is automatically picked up by
 `xgboost_experiments.py` at runtime.
 
+Random Forest hyperparameters can be tuned the same way:
+
+```bash
+python src/experiments/rule_mining/tune_random_forest.py
+```
+
+This saves the best parameters to `src/experiments/random_forest_best_parameters.json`, automatically
+picked up by `random_forest_experiments.py` at runtime.
+
+**Binning sensitivity analysis**
+
+[`binning_sensitivity_analysis.py`](src/experiments/binning_sensitivity_analysis.py) reruns rule mining
+across all instantiations (Aerial+, the 3 TFMs, XGBoost, Random Forest, FP-Growth) at alternative
+discretization bin counts (3, 5) alongside the paper's default (10), on datasets with numerical columns.
+
+```bash
+python src/experiments/binning_sensitivity_analysis.py
+```
+
+**Calibration diagnostics**
+
+[`calibration_diagnostics.py`](src/experiments/calibration/calibration_diagnostics.py) measures how well
+calibrated each method's reconstruction probabilities are, reporting ECE, Brier score, and reliability
+diagrams.
+
+```bash
+python src/experiments/calibration/calibration_diagnostics.py
+```
+
 **Running on GPU clusters**
 
 For HPC environments with SLURM, `setup_environment.sh` can be used to create the conda
@@ -213,8 +252,8 @@ dataset and seed are saved into `out/classifiers`.
 
 ## Learn Rules on Your Own Data
 
-Beyond reproducing the experiments, this repository also provides a `wrapper/tabprobe` wrapper for TabPFN, TabICL and
-TabDPT that can be run on any given dataset in `pandas.Dataframe` form.
+Beyond reproducing the experiments, this repository also provides a `wrapper/tabprobe` wrapper for TabPFN, TabICL,
+TabDPT, XGBoost and Random Forest that can be run on any given dataset in `pandas.Dataframe` form.
 
 To be able to run the example code below, install `ucimlrepo` repository which the code uses to fetch a sample dataset.
 
@@ -298,12 +337,12 @@ The `TabProbe` class exposes the following parameters:
 
 ```python
 TabProbe(
-    method='tabicl',  # Foundation model to use: 'tabpfn', 'tabicl', or 'tabdpt'
+    method='tabicl',  # Model to use: 'tabpfn', 'tabicl', 'tabdpt', 'xgboost', or 'random_forest'
     max_antecedents=2,  # Maximum number of items allowed in the rule antecedent
     ant_similarity=0.5,  # Similarity threshold for validating antecedents (0.0–1.0)
     cons_similarity=0.8,  # Similarity threshold for extracting consequents (0.0–1.0)
-    n_estimators=8,  # Number of ensemble estimators for prediction averaging
-    noise_factor=0.5,  # Gaussian noise factor added to context data
+    n_estimators=None,  # Ensemble size; defaults to 8 for tabpfn/tabicl/tabdpt, 100 (trees) for xgboost/random_forest
+    noise_factor=0.5,  # Gaussian noise factor added to context data (tabpfn/tabicl/tabdpt only)
     n_bins=5,  # Number of bins for discretizing numerical features
     random_state=42  # Random seed for reproducibility
 )

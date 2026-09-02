@@ -2,9 +2,6 @@
 Optuna-based hyperparameter tuning for XGBoost rule mining.
 Tunes max_depth, learning_rate, n_estimators per dataset to maximize
 confidence * zhang_metric. Saves results to src/experiments/xgboost_best_parameters.json.
-
-Tuning uses at most TUNING_SAMPLES rows per dataset to keep trials tractable;
-the actual experiments run on the full dataset with the found parameters.
 """
 
 import json
@@ -47,6 +44,9 @@ def make_objective(dataset, random_state):
                 random_state=random_state,
                 max_workers=1,
                 query_batch_size=512,
+                # tune the raw model, not a calibration layer applied on top of it --
+                # xgb_rule_learning auto-calibrates CALIBRATE_DATASETS by default
+                auto_calibrate=False,
             )
         except Exception:
             return 0.0
@@ -73,6 +73,8 @@ if __name__ == "__main__":
 
     datasets = get_ucimlrepo_datasets(size="small") + get_ucimlrepo_datasets(size="normal")
     best_params = {}
+    output_path = os.path.normpath(OUTPUT_JSON)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     for dataset_info in datasets:
         dataset_name = dataset_info["name"]
@@ -101,10 +103,9 @@ if __name__ == "__main__":
             "best_objective": best_value,
         }
 
-    output_path = os.path.normpath(OUTPUT_JSON)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(best_params, f, indent=2)
+        with open(output_path, "w") as f:
+            json.dump(best_params, f, indent=2)
+        print(f"  Saved progress ({len(best_params)}/{len(datasets)} datasets) to {output_path}")
 
     print("\n" + "=" * 80)
     print(f"Best parameters saved to {output_path}")

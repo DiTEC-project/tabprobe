@@ -21,6 +21,8 @@ from src.experiments.rule_mining.tabicl_experiments import tabicl_rule_learning
 from src.experiments.rule_mining.tabpfn_experiments import tabpfn_rule_learning
 from src.experiments.rule_mining.tabdpt_experiments import tabdpt_rule_learning, filter_single_value_columns
 from src.experiments.rule_mining.fpgrowth_experiments import fpgrowth_rule_learning
+from src.experiments.rule_mining.random_forest_experiments import rf_rule_learning
+from src.experiments.rule_mining.xgboost_experiments import xgb_rule_learning
 
 from src.utils import set_seed, generate_seed_sequence
 from src.utils.data_prep import prepare_categorical_data
@@ -141,9 +143,6 @@ if __name__ == "__main__":
     n_runs_per_config = 5
     base_seed = 42
 
-    # Target OHE column counts. Each binary item encodes to 2 OHE columns,
-    # so target 200 → selects ~100 items. Adjust upper bound to taste;
-    # the experiment handles failures gracefully if a run times out.
     target_column_counts = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 120, 140, 160, 180, 200]
 
     # Number of parallel workers for TFM feature-predictor loop.
@@ -151,6 +150,7 @@ if __name__ == "__main__":
     # On CPU: raise to os.cpu_count() for full utilisation.
     PARALLEL_WORKERS = 1
     QUERY_BATCH_SIZE = 4096
+    XGB_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # ---- Method Parameters ----
 
@@ -189,6 +189,28 @@ if __name__ == "__main__":
         'query_batch_size': QUERY_BATCH_SIZE,
     }
 
+    random_forest_params = {
+        'max_antecedents': 2,
+        'ant_similarity': 0.5,
+        'cons_similarity': 0.8,
+        'n_estimators': 100,
+        'max_depth': None,
+        'max_workers': PARALLEL_WORKERS,
+        'query_batch_size': QUERY_BATCH_SIZE,
+    }
+
+    xgboost_params = {
+        'max_antecedents': 2,
+        'ant_similarity': 0.5,
+        'cons_similarity': 0.8,
+        'n_estimators': 100,
+        'max_depth': 3,
+        'learning_rate': 0.3,
+        'max_workers': PARALLEL_WORKERS,
+        'query_batch_size': QUERY_BATCH_SIZE,
+        'device': XGB_DEVICE,
+    }
+
     fpgrowth_params_0_1 = {'max_len': 2, 'min_confidence': 0.8, 'min_support': 0.1, 'compute_stats': False}
     fpgrowth_params_0_05 = {'max_len': 2, 'min_confidence': 0.8, 'min_support': 0.05, 'compute_stats': False}
     fpgrowth_params_0_01 = {'max_len': 2, 'min_confidence': 0.8, 'min_support': 0.01, 'compute_stats': False}
@@ -211,13 +233,15 @@ if __name__ == "__main__":
     # show the speedup from parallelisation on the same plot.
 
     methods = {
-        'aerial': (aerial_rule_learning, aerial_params),
-        'tabicl': (tabicl_rule_learning, tabicl_params),
-        'tabpfn': (tabpfn_rule_learning, tabpfn_params),
-        'tabdpt': (tabdpt_rule_learning, tabdpt_params),
-        'fpgrowth_0.1': (fpgrowth_rule_learning, fpgrowth_params_0_1),
-        'fpgrowth_0.05': (fpgrowth_rule_learning, fpgrowth_params_0_05),
-        'fpgrowth_0.01': (fpgrowth_rule_learning, fpgrowth_params_0_01),
+        # 'aerial': (aerial_rule_learning, aerial_params),
+        # 'tabicl': (tabicl_rule_learning, tabicl_params),
+        # 'tabpfn': (tabpfn_rule_learning, tabpfn_params),
+        # 'tabdpt': (tabdpt_rule_learning, tabdpt_params),
+        'random_forest': (rf_rule_learning, random_forest_params),
+        # 'xgboost': (xgb_rule_learning, xgboost_params),
+        # 'fpgrowth_0.1': (fpgrowth_rule_learning, fpgrowth_params_0_1),
+        # 'fpgrowth_0.05': (fpgrowth_rule_learning, fpgrowth_params_0_05),
+        # 'fpgrowth_0.01': (fpgrowth_rule_learning, fpgrowth_params_0_01),
     }
 
     seed_sequence = generate_seed_sequence(base_seed, n_runs_per_config)
@@ -333,6 +357,8 @@ if __name__ == "__main__":
             'tabicl_params': str(tabicl_params),
             'tabpfn_params': str(tabpfn_params),
             'tabdpt_params': str(tabdpt_params),
+            'random_forest_params': str(random_forest_params),
+            'xgboost_params': str(xgboost_params),
         }])
         params_df.to_excel(writer, sheet_name='Parameters', index=False)
 

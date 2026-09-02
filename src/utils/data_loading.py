@@ -75,6 +75,10 @@ def get_ucimlrepo_datasets(
         if discretize and name in DATASETS_TO_DISCRETIZE:
             df = discretize_numerical_features(df)
 
+        # Stamped on every load so downstream code (e.g. XGBoost's per-dataset calibration
+        # policy) can identify the dataset without every caller threading a name through.
+        df.attrs['name'] = name
+
         datasets.append({
             'name': name,
             'data': df
